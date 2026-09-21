@@ -1,0 +1,2294 @@
+<!DOCTYPE html>
+<!-- このファイルは scripts/build-web.js が自動生成しています。直すのは bentou_MobileRun/index.html のほう。 -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>受注反映</title>
+<!-- 接続先（…/exec）。config.js は端末ごとに配る値なのでソースには書かない -->
+<script src="config.js"></script>
+<style>
+  :root { --blue:#1a73e8; --orange:#e8710a; --red:#d93025; --gray:#5f6368; --line:#dadce0; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+         font-size:16px; color:#202124; background:#f8f9fa; }
+  .wrap { padding:16px; max-width:640px; margin:0 auto; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .ver { font-size:12px; color:var(--gray); margin-bottom:16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .card.disabled { opacity:.5; }
+  .btn { display:block; width:100%; padding:16px; font-size:17px; font-weight:600;
+         border:none; border-radius:12px; background:var(--blue); color:#fff; margin-bottom:12px; }
+  .btn.sub { background:#fff; color:var(--blue); border:1px solid var(--line); }
+  .btn.danger { background:var(--red); }
+  .btn:disabled { background:#e0e0e0; color:#9aa0a6; }
+  .row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #f1f3f4; font-size:15px; }
+  .row .k { color:var(--gray); }
+  .row .v { font-weight:600; text-align:right; margin-left:12px; }
+  .flag { display:inline-block; padding:6px 14px; border-radius:999px; color:#fff; font-weight:700; font-size:15px; background:var(--gray); }
+  .flag.new { background:var(--blue); } .flag.chg { background:var(--orange); } .flag.cxl { background:var(--red); }
+  .alert { padding:12px; border-radius:8px; font-size:14px; margin-bottom:12px; line-height:1.6; }
+  .alert.err { background:#fce8e6; color:#c5221f; } .alert.warn { background:#fef7e0; color:#b06000; }
+  .alert.info { background:#e8f0fe; color:#174ea6; }
+  .overlay { position:fixed; left:0; top:0; right:0; bottom:0; z-index:10; background:rgba(0,0,0,.5);
+             display:flex; align-items:center; justify-content:center; padding:16px; }
+  .overlay .card { width:100%; max-width:420px; margin:0; }
+  /* display:flex は hidden 属性（display:none）より優先されるため、明示的に隠す。
+     これが無いと確認の窓が常に出たままになり、「戻る」も効かない。 */
+  .overlay[hidden] { display:none; }
+  .muted { color:var(--gray); font-size:13px; line-height:1.6; }
+  pre { white-space:pre-wrap; word-break:break-all; font-size:12px; background:#f1f3f4; padding:12px; border-radius:8px; }
+  .center { text-align:center; }
+  .big { font-size:44px; margin:16px 0 8px; }
+
+  /* --- S-A 入力フォーム --- */
+  label { display:block; font-size:13px; color:var(--gray); font-weight:600; margin:10px 0 4px; }
+  input, select, textarea {
+    display:block; width:100%; font-size:16px; padding:10px;
+    border:1px solid var(--line); border-radius:8px; font-family:inherit;
+    background:#fff; color:#202124;
+  }
+  textarea { resize:vertical; }
+  details { margin:14px 0 4px; }
+  details summary { cursor:pointer; font-size:14px; color:var(--blue); padding:6px 0; }
+  .itemRow { display:flex; gap:8px; align-items:center; margin-bottom:10px; }
+  .itemRow select, .itemRow input { margin:0; }
+  .itemRow .itemQty { width:76px; flex:0 0 76px; }
+  /* 変更モードで直せない欄（受注番号・屋号・媒体・注文日など）は灰色にして見分けられるようにする */
+  input:disabled, select:disabled, textarea:disabled { background:#f1f3f4; color:#80868b; opacity:1; }
+  .itemRow .removeItem:disabled { color:#9aa0a6; }
+  .linkBtn { display:block; width:100%; background:none; border:none; padding:10px 0 0; font-size:14px;
+             color:var(--blue); text-decoration:underline; text-align:left; font-family:inherit; }
+  .orderRow { cursor:pointer; }
+  .orderRow .when { font-weight:700; font-size:16px; }
+  .orderRow .ttl { font-size:14px; margin-top:4px; word-break:break-all; }
+  .diffRow { padding:8px 0; border-bottom:1px solid #f1f3f4; font-size:15px; line-height:1.6; word-break:break-all; }
+  .diffRow .k { color:var(--gray); font-size:13px; }
+  .diffRow .after { font-weight:700; color:var(--orange); }
+  .itemRow .removeItem { flex:0 0 auto; width:44px; padding:10px 0; border:1px solid var(--line);
+    border-radius:8px; background:#fff; color:var(--red); font-size:16px; font-weight:700; }
+
+  /* --- 入口（合言葉）--- */
+  /* ホームは入口（合言葉）を通ってから show('s0') で出す。
+     ほかの画面と違ってタグ側に style を書かないのは、ホームの中身を
+     ソースから切り出して調べているテストの目印を崩さないため。 */
+  #s0 { display:none; }
+  .lock { display:block; }
+  /* display を指定した要素は hidden 属性だけでは隠れない（.overlay と同じ落とし穴） */
+  .lock[hidden] { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>受注反映</h1>
+  <div class="ver" id="ver"></div>
+
+  <!-- 本番以外へ向いているときだけ出る赤帯。起動直後から出す -->
+  <div class="alert err" id="envBanner" style="display:none"></div>
+
+  <!-- 入口：合言葉。端末の登録が無い／切れているときだけ出す。
+       ここを通るまで、ほかの画面もサーバ呼び出しも一切動かさない。
+       合言葉は現場スタッフには配らない。管理者が端末ごとに1回だけ入力して開通させる
+       運用なので、利用者が合言葉を持っている前提の文言にしないこと（2026-09-21 よしさん決定）。 -->
+  <div id="lock" class="lock" hidden>
+    <div class="card">
+      <h2 style="font-size:17px; margin:0 0 8px">この端末を使えるようにします</h2>
+      <p class="muted" style="margin-top:0">
+        最初の1回だけ必要です。<strong>管理者が入力します。</strong>
+        合言葉が分からない場合は管理者へご連絡ください。
+      </p>
+      <form id="lockForm" onsubmit="submitUnlock(); return false;">
+        <label for="lockPass">合言葉</label>
+        <input id="lockPass" type="password" autocomplete="current-password"
+               inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <button type="submit" class="btn" id="lockBtn" style="margin:12px 0 0">開く</button>
+      </form>
+      <div id="lockMsg"></div>
+    </div>
+  </div>
+
+  <!-- S0 ホーム（モード選択）。入口を通ってから show('s0') で出す（初期状態は CSS で隠す）-->
+  <div id="s0">
+    <!-- 前回、入力経路の実行に失敗した受注がある場合だけ出す（Task 8c R10） -->
+    <div class="alert warn" id="failedBanner" style="display:none"></div>
+    <!-- 第2弾：シートを書き換えたまま未反映の受注がある場合だけ出す（設計書 第2弾 §6-2） -->
+    <div class="alert warn" id="pendingBanner" style="display:none"></div>
+    <button class="btn" onclick="goInput()">✍ 新規の受注を入力する</button>
+    <button class="btn sub" onclick="goEditSearch()">✎ 受注を変更・キャンセルする</button>
+    <button class="btn sub" id="lastBtn" style="display:none" onclick="showLast()">前回の結果を見る</button>
+    <!-- 通常は「入力する」で完結するので、主ボタンから外した（2026-09-19 よしさん決定）。
+         入力画面で入れられない受注（13品以上・送料や調整金額を触るもの）を
+         シートへ直接入力したときのために残してある。 -->
+    <details style="margin-top:16px">
+      <summary class="muted">その他</summary>
+      <button class="btn sub" onclick="goList('new')">▶ シートに直接入力した新規受注を反映する</button>
+      <!-- 送料・調整金額・13品目以降など、フォームに無い項目をシートで直したときの出口（第2弾 §3-1） -->
+      <button class="btn sub" onclick="goList('edit')">✎ シートで直した変更・キャンセルを反映する</button>
+    </details>
+  </div>
+
+  <!-- S-E 変更・キャンセルの対象を探す（第2弾 §4） -->
+  <div id="se" style="display:none">
+    <form id="seForm" class="card" onsubmit="runOrderSearch(); return false;">
+      <label for="seQuery">会社名・受注番号などで探す（今日以降の納品分）</label>
+      <input id="seQuery" type="search" autocomplete="off">
+      <button type="submit" class="btn" id="seSearchBtn" style="margin:12px 0 0">検索</button>
+      <button type="button" class="linkBtn" id="seByNameBtn" onclick="runOrderSearchByName()">見つからないとき：ファイル名で探す</button>
+    </form>
+    <div id="seMsg"></div>
+    <div id="seList"></div>
+    <button type="button" class="btn sub" onclick="goHomeFromEdit()">戻る</button>
+  </div>
+
+  <!-- S-V 選んだ受注の内容と、変更・キャンセルの入口 -->
+  <div id="sv" style="display:none">
+    <div id="svMsg"></div>
+    <div class="card" id="svDetail"></div>
+    <button type="button" class="btn" id="svChangeBtn" onclick="startChange()" disabled>内容を変更する</button>
+    <button type="button" class="btn danger" id="svCancelBtn" onclick="startCancel()" disabled>この受注をキャンセルする</button>
+    <button type="button" class="btn sub" id="svBackBtn" onclick="backToSearch()">戻る</button>
+  </div>
+
+  <!-- S-A 新規受注の入力 -->
+  <div id="sa" style="display:none">
+    <div id="saErrors"></div>
+    <!-- 入力途中の下書きを復元したときだけ出す -->
+    <div class="alert info" id="draftBanner" hidden>
+      前回の入力途中の内容を復元しました。
+      <button type="button" class="btn sub" onclick="discardDraft()">破棄して最初から</button>
+    </div>
+    <!-- 変更モード（登録済みの受注を直す）のときだけ出す -->
+    <div class="alert info" id="editBanner" hidden></div>
+    <form id="saForm" onsubmit="submitInputForm(); return false;">
+      <div class="card">
+        <label for="inShopName">屋号</label>
+        <input id="inShopName" type="text" required>
+
+        <label for="inDeliveryDate">納品日</label>
+        <input id="inDeliveryDate" type="date" required>
+
+        <label for="inStartTime">納品開始時刻</label>
+        <input id="inStartTime" type="time" value="09:00" required>
+
+        <label for="inEndTime">納品終了時刻</label>
+        <input id="inEndTime" type="time" value="10:00" required>
+
+        <label for="inOrderDate">注文日</label>
+        <input id="inOrderDate" type="date">
+
+        <label for="inCompanyName">会社名</label>
+        <input id="inCompanyName" type="text" required>
+
+        <label for="inPersonName">担当者名</label>
+        <input id="inPersonName" type="text" required>
+
+        <label for="inPhone">電話番号</label>
+        <input id="inPhone" type="tel" inputmode="tel" required>
+
+        <label for="inAddress1">お届け先住所</label>
+        <input id="inAddress1" type="text" required>
+
+        <label for="inMedia">媒体</label>
+        <input id="inMedia" type="text" required>
+
+        <label for="inPayment">支払方法</label>
+        <input id="inPayment" type="text" required>
+
+        <label for="inHandover">受渡方法</label>
+        <input id="inHandover" type="text">
+
+        <label for="inPickupCarrier">配送・集荷担当</label>
+        <input id="inPickupCarrier" type="text">
+
+        <label for="inOrderNo">受注番号</label>
+        <input id="inOrderNo" type="text" required>
+
+        <details>
+          <summary>任意項目（建物名・連絡事項・但書きなど）</summary>
+          <label for="inAddress2">建物名・部屋番号など</label>
+          <input id="inAddress2" type="text">
+
+          <label for="inContactNote">連絡事項</label>
+          <textarea id="inContactNote" rows="3"></textarea>
+
+          <label for="inContactNeeded">連絡有無</label>
+          <input id="inContactNeeded" type="text">
+
+          <label for="inDeliveryStaff">納品時担当者</label>
+          <input id="inDeliveryStaff" type="text">
+
+          <label for="inReceiptNote">但書き</label>
+          <input id="inReceiptNote" type="text">
+        </details>
+      </div>
+
+      <div class="card">
+        <div class="k" style="margin-bottom:8px">商品明細</div>
+        <!-- 変更モードで商品を直せないファイル（13品以上・プルダウンに無い略語）のときだけ出す -->
+        <div class="alert warn" id="editItemsNote" hidden></div>
+        <div id="inItems"></div>
+        <button type="button" class="btn sub" id="addItemBtn" onclick="addItemRow()">＋ 商品を追加</button>
+      </div>
+
+      <button type="submit" class="btn" id="saSubmitBtn">確認へ</button>
+    </form>
+    <button type="button" class="btn sub" onclick="goHomeFromInput()">戻る</button>
+  </div>
+
+  <!-- S1 対象ファイル選択 -->
+  <div id="s1" style="display:none">
+    <div class="flow-title" id="s1title"></div>
+    <div id="s1msg"></div>
+    <div id="s1list"></div>
+    <button class="btn sub" onclick="show('s0')">戻る</button>
+  </div>
+
+  <!-- S2 内容確認 -->
+  <div id="s2" style="display:none">
+    <div id="s2alerts"></div>
+    <!-- 変更の確認のときだけ出す「前 → 後」 -->
+    <div class="card" id="s2diff" hidden></div>
+    <div class="card" id="s2detail"></div>
+    <div class="card" id="s2items"></div>
+    <button class="btn" id="runBtn" onclick="openRunConfirm()" disabled>この内容で実行する</button>
+    <button class="btn sub" id="s2BackBtn" onclick="goBackFromConfirm()">戻る</button>
+  </div>
+
+  <!-- 実行前の確認の窓。ブラウザ標準の confirm はアプリ内ブラウザで出ないことがあるため自前で持つ -->
+  <div id="runConfirm" class="overlay" hidden>
+    <div class="card">
+      <p class="center"><strong>実行しますか？</strong></p>
+      <div id="rcDetail"></div>
+      <button class="btn" id="rcGo" onclick="confirmRun()">実行する</button>
+      <button class="btn sub" onclick="closeRunConfirm()">戻る</button>
+    </div>
+  </div>
+
+  <!-- S3 実行中 -->
+  <div id="s3" style="display:none" class="center">
+    <div class="big">⏳</div>
+    <p><strong>実行中です</strong></p>
+    <p class="muted">画面を閉じないでください。<br>最大2分ほどかかります。</p>
+    <p class="muted" id="elapsed"></p>
+  </div>
+
+  <!-- S4/S5 結果 -->
+  <div id="s4" style="display:none">
+    <div class="center"><div class="big" id="rIcon"></div><p><strong id="rTitle"></strong></p></div>
+    <div id="rAlerts"></div>
+    <div class="card" id="rNext"></div>
+    <!-- 失敗系のときだけ出す（renderResult が出し分ける）。完了時は現場に不要なので隠す -->
+    <div id="rDetailBox" hidden>
+      <button class="btn sub" onclick="toggleDetail()">エラーの詳細を表示</button>
+      <pre id="rDetail" style="display:none"></pre>
+      <button class="btn sub" onclick="copyDetail()">エラー内容をコピー（管理者へ送る用）</button>
+    </div>
+    <button class="btn" onclick="reset()">最初に戻る</button>
+  </div>
+</div>
+
+<script>
+var state = { mode: 'new', files: [], token: null, detail: null,
+              result: null, timer: null,
+              inputMode: false, inputForm: null,
+              // --- 第2弾（登録済みの受注の変更・キャンセル）---
+              editMode: false,       // 入力フォーム（saForm）を変更モードで使っている間だけ true
+              editFlow: false,       // 確認画面（s2）が変更・キャンセルの流れで開かれている間だけ true
+              editResume: false,     // ホームの「続きから反映する」で確認画面に来た
+              editKind: '',          // 'change' | 'cancel'
+              editSel: null,         // 一覧で選んだ受注 {ssId, orderNo, title}
+              editOrder: null,       // mrLoadEdit の戻り値（開いたときの値）
+              editBaseline: null,    // 値を流し込んだ直後のフォームの内容（触った欄を見分けるため）
+              editItemsEditable: true,
+              pendingEdit: null,     // 書き換えたまま未反映の受注（mrGetPendingEdit の戻り値）
+              noRevertSsId: '' };    // 一覧表へ反映済みで「元に戻す」を出してはいけない受注
+var MODE_LABEL = { new: 'シートに直接入力した新規受注を反映', edit: 'シートで直した変更・キャンセルを反映' };
+
+// MR_CONST.MAX_ITEMS（Config_MobileRun.js）と同じ値にすること。
+// index.html はテストできないため、ここに定数を複製している。
+var MAX_ITEMS = 12;
+
+var SCREEN_IDS = ['s0','s1','s2','s3','s4','sa','se','sv'];
+
+function show(id) {
+  SCREEN_IDS.forEach(function (s) {
+    document.getElementById(s).style.display = (s === id ? 'block' : 'none');
+  });
+  window.scrollTo(0, 0);
+}
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function flagClass(f) { return f === '新規' ? 'new' : f === '変更' ? 'chg' : f === 'キャンセル' ? 'cxl' : ''; }
+
+/**
+ * 反映先の表示と赤帯。一覧を読み込む前に呼べるようにしてある。
+ * テスト環境へ向いていることに気づかないまま本番受注を流すのを防ぐのが目的で、
+ * ホーム画面の時点で出す必要がある（handoff §8）。
+ */
+function renderEnv(env) {
+  document.getElementById('ver').textContent =
+    'ver ' + env.appVersion + '　／　反映先: ' + env.clientName;
+  var banner = document.getElementById('envBanner');
+  if (env.isProduction) {
+    banner.style.display = 'none';
+  } else {
+    banner.style.display = 'block';
+    banner.textContent = '⚠️ テスト環境です（反映先: ' + env.clientName
+                       + '）。本番の受注一覧表・カレンダーには反映されません。';
+  }
+}
+
+// ---------------------------------------------------------------
+// 端末の識別と、任意の入口施錠（合言葉）
+//
+// この画面はGoogleの外（静的ホスト）へ置く。複数のGoogleアカウントに
+// 同時ログインしていると、Googleが script.google.com のURLを /u/1/ 付きへ
+// 書き換えてしまい、現場の端末が「申し訳ありません、ファイルを開くことができません」
+// で止まるため（公開設定を変えても直らなかった。2026-09-21 よしさん決定）。
+// サーバはJSON APIとして呼ぶだけなので、ブラウザがGoogleへ移動することが無くなる。
+// 詳細は docs/mobile-app-static-hosting.md。
+//
+// APIは匿名公開（ANYONE_ANONYMOUS）。Googleのログインを通らないので、
+// 端末ID（deviceId）は必ず作って毎回送る。これが無いと利用者を見分けられず、
+// 下書き・前回の結果・未反映の記録が他人と混ざる。
+//
+// 合言葉（サーバの APP_PASSPHRASE）は任意で、**通常は未設定＝施錠しない**。
+// 未設定なら署名（sig）は空のままで、この画面は普通に起動する。
+// 設定されている運用では、サーバが「この端末は登録されていません」を返すので、
+// そのときだけ入口（#lock）を出して管理者に合言葉を入れてもらう。
+// ---------------------------------------------------------------
+var AUTH_STORE_KEY = 'mr_auth';   // localStorage に入れる値は {deviceId, sig} のJSON
+var AUTH = null;                  // サーバへ添える組。形を知っているのは setAuth だけ
+var DEVICE_ID = '';               // 端末の識別子。署名が無効になっても作り直さない
+
+/** サーバ呼び出しの第1引数。呼び出し側が auth の中身を知らずに済むようにする */
+function authArg() {
+  return AUTH;
+}
+
+/** auth の形を知っているのはここだけ。sig は施錠していない運用では空のまま */
+function setAuth(deviceId, sig) {
+  DEVICE_ID = deviceId;
+  AUTH = { deviceId: deviceId, sig: sig || '' };
+  return AUTH;
+}
+
+// localStorage はプライベートモードや保存の拒否で例外を投げる。
+// 読み書きのすべてを try/catch で包み、失敗しても入口だけは出せるようにする。
+function readStoredAuth() {
+  try {
+    var raw = localStorage.getItem(AUTH_STORE_KEY);
+    if (!raw) return null;
+    var parsed = JSON.parse(raw);
+    // 施錠していない運用では sig が空。端末IDだけあれば使える
+    if (!parsed || !parsed.deviceId) return null;
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+function writeStoredAuth(a) {
+  try {
+    localStorage.setItem(AUTH_STORE_KEY, JSON.stringify(a));   // 中身は setAuth が作った組だけ
+  } catch (e) {
+    /* 保存できなくてもこの1回は使える。次に開いたとき合言葉を聞き直すだけ */
+  }
+}
+/**
+ * 無効になった署名を捨てる。端末IDは残す。
+ * 端末IDまで作り直すと、下書き・前回の結果・未反映の記録が
+ * 「別の端末のもの」になって取り出せなくなる。
+ */
+function forgetSignature() {
+  setAuth(DEVICE_ID, '');
+  writeStoredAuth(AUTH);
+}
+
+/** 端末の識別子。中身に意味は持たせない（16進32桁のランダム） */
+function newDeviceId() {
+  var s = '';
+  for (var i = 0; i < 32; i++) s += Math.floor(Math.random() * 16).toString(16);
+  return s;
+}
+
+// ---------------------------------------------------------------
+// サーバ呼び出しの差し替え（Googleの外に置いた画面用）
+//
+// Apps Script が配っている画面では google.script.run が最初からある。
+// 静的ホストに置いた同じ画面には無いので、同じ使い方（withSuccessHandler →
+// withFailureHandler → 関数名）ができる代役をここで作る。
+// **画面側の呼び出しは1か所も書き換えない**（20か所以上あり、書き換えると必ず漏れる）。
+//
+// 呼べる関数名は下の一覧をそのまま使う。Proxy は使わない（古い端末のブラウザに無い）。
+// サーバ側 WebApp.js の mrApiTable_() と同じ並びにすること。
+// 片方に足してもう片方を忘れると、その操作だけ静かに動かなくなる
+// （tests/mobileInputGuards.test.js が画面の呼び出し箇所と突き合わせて落とす）。
+// ---------------------------------------------------------------
+var MR_RPC_NAMES = [
+  'mrUnlock',
+  'mrGetEnv', 'mrGetLastResult', 'mrGetFailedIntake', 'mrClearFailedIntake',
+  'mrGetInputChoices', 'mrListTargets', 'mrGetDetail', 'mrApply',
+  'mrPrepareInput', 'mrRunInput', 'mrDiscardPreparedInput',
+  'mrSaveDraft', 'mrGetDraft', 'mrClearDraft',
+  'mrSearchOrders', 'mrSearchOrdersByName', 'mrLoadEdit', 'mrPrepareEdit',
+  'mrGetPendingEdit', 'mrResumePendingEdit', 'mrRevertPendingEdit', 'mrDismissPendingEdit'
+];
+
+// 合言葉を確かめる入口だけ auth を持たずに呼ぶ（サーバの MR_API_NO_AUTH と同じ）
+var MR_RPC_NO_AUTH = 'mrUnlock';
+
+/** Apps Script が配っている画面なら true（そのときは代役を作らない） */
+function hasGoogleScriptRun() {
+  return typeof google !== 'undefined' && google && google.script && !!google.script.run;
+}
+
+// 端末に覚えさせた接続先の保存キー
+var MR_API_STORAGE_KEY = 'mr_api';
+
+/**
+ * 接続先として受け付けるURLの形。
+ *
+ * 🔴 ここを緩めないこと。#api= は誰でも作れるリンクなので、
+ * 形を絞らないと「細工したリンクを踏ませて、受注の内容を別のサーバへ送らせる」ことができてしまう。
+ * 受け付けるのは Apps Script のウェブアプリ（/macros/s/<id>/exec）だけにする。
+ */
+var MR_API_URL_PATTERN = /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/;
+
+/**
+ * APIのURL。次の順で決める。
+ *   1. 端末に覚えさせた値
+ *   2. アドレスの #api=... （管理者が端末を用意するときに1回だけ使う。覚えたらアドレスから消す）
+ *   3. config.js の値
+ *
+ * 2 を用意しているのは、置き場所（公開されるページ）に実物のURLを置かずに済ませるため。
+ */
+function apiUrl() {
+  var stored = '';
+  try { stored = localStorage.getItem(MR_API_STORAGE_KEY) || ''; } catch (e) { stored = ''; }
+
+  var m = String(location.hash + '&' + location.search).match(/[#?&]api=([^&]+)/);
+  if (m) {
+    var given = '';
+    try { given = decodeURIComponent(m[1]); } catch (e) { given = ''; }
+    if (MR_API_URL_PATTERN.test(given)) {
+      try { localStorage.setItem(MR_API_STORAGE_KEY, given); } catch (e) { /* 保存できなくても今回は使える */ }
+      // アドレスから消す（他の人に見えるところへ残さない）
+      try { history.replaceState(null, '', location.pathname); } catch (e) { /* 古い端末では消せない */ }
+      return given;
+    }
+  }
+
+  if (stored) return stored;
+  return typeof MR_API_URL === 'undefined' ? '' : MR_API_URL;
+}
+
+/**
+ * 1回分のサーバ呼び出し。
+ *
+ * 🔴 Apps Script は CORS の事前確認（OPTIONS / preflight）に答えられない。
+ * 別ドメインから呼ぶので「単純なリクエスト」にしなければ必ず失敗する。
+ * Content-Type は text/plain;charset=utf-8 のまま、独自ヘッダを足さないこと。
+ */
+function callApi(name, args, onSuccess, onFailure) {
+  var url = apiUrl();
+  if (!url) {
+    deliverApi(onSuccess, onFailure,
+      new Error('接続先が設定されていません。管理者に端末の設定を依頼してください'), null);
+    return;
+  }
+
+  var auth = null;
+  var rest = args;
+  if (name !== MR_RPC_NO_AUTH) {
+    // 画面の呼び出しは第1引数が必ず authArg()。ここで封筒へ移し替える。
+    // 渡し忘れた呼び出しは引数がずれるので、送らずに失敗として返す（黙って壊さない）。
+    if (!args.length || args[0] !== authArg()) {
+      deliverApi(onSuccess, onFailure,
+        new Error('内部エラー：' + name + ' に auth を渡していません'), null);
+      return;
+    }
+    auth = args[0];
+    rest = args.slice(1);
+  }
+
+  fetch(url, {
+    method: 'POST',
+    // 🔴 ここを application/json にしたり独自ヘッダを足したりしないこと。
+    // CORS の事前確認（preflight）が走り、Apps Script はそれに答えられないので
+    // 別ドメインからの呼び出しが丸ごと通らなくなる。
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ fn: name, args: rest, auth: auth })
+  }).then(function (res) {
+    return res.text();
+  }).then(function (text) {
+    var data = null;
+    var err = null;
+    try {
+      var parsed = JSON.parse(text);
+      if (!parsed || parsed.ok !== true) {
+        throw new Error((parsed && parsed.error) || '処理に失敗しました');
+      }
+      data = parsed.data;
+    } catch (e) {
+      err = (e instanceof Error) ? e : new Error('サーバの応答を読めませんでした');
+    }
+    deliverApi(onSuccess, onFailure, err, data);
+  }, function (e) {
+    deliverApi(onSuccess, onFailure,
+      new Error('通信に失敗しました：' + ((e && e.message) || e)), null);
+  });
+}
+
+/**
+ * 結果を画面へ返す。
+ * 失敗のときは、まず端末の登録切れかどうかをここで見る。呼び出し箇所ごとに
+ * 書き足すと必ず漏れるので、代役を通る呼び出しはすべてここ1か所で拾う。
+ * setTimeout で呼ぶのは、画面側の処理で起きた例外を Promise が飲み込まないため。
+ */
+function deliverApi(onSuccess, onFailure, err, data) {
+  setTimeout(function () {
+    if (err) {
+      if (handleAuthError(err)) return;
+      if (typeof onFailure === 'function') onFailure(err);
+      return;
+    }
+    if (typeof onSuccess === 'function') onSuccess(data);
+  }, 0);
+}
+
+/**
+ * google.script.run の代役を1つ作る。
+ * withSuccessHandler / withFailureHandler は「その手当てを覚えた別の入れ物」を返す。
+ * 元の入れ物は手当てを持たないままなので、前の呼び出しの手当てが次に混ざらない。
+ */
+function makeRunner(onSuccess, onFailure) {
+  var runner = {
+    withSuccessHandler: function (fn) { return makeRunner(fn, onFailure); },
+    withFailureHandler: function (fn) { return makeRunner(onSuccess, fn); },
+    withUserObject: function () { return runner; }   // 本物にある連鎖。画面では使っていない
+  };
+  MR_RPC_NAMES.forEach(function (name) {
+    runner[name] = function () {
+      callApi(name, Array.prototype.slice.call(arguments), onSuccess, onFailure);
+    };
+  });
+  return runner;
+}
+
+/** Apps Script の外で開かれたときだけ、代役を google.script.run として据える */
+function installApiShim() {
+  if (hasGoogleScriptRun()) return false;
+  window.google = { script: { run: makeRunner(null, null) } };
+  return true;
+}
+
+// 画面のどこかがサーバを呼ぶ前に据える（起動は一番下の boot()）
+var USING_API_SHIM = installApiShim();
+
+function setLockMsg(text) {
+  var box = document.getElementById('lockMsg');
+  box.innerHTML = '';
+  if (text) box.appendChild(mkAlert('err', text));
+}
+
+/**
+ * 入口（合言葉）を出す。ほかの画面はすべて閉じ、サーバ呼び出しもしない。
+ * 合言葉を設定していない運用では、ここは一度も呼ばれない。
+ */
+function showLock(message) {
+  forgetSignature();
+  SCREEN_IDS.forEach(function (s) { document.getElementById(s).style.display = 'none'; });
+  document.getElementById('lock').hidden = false;
+  document.getElementById('lockPass').value = '';
+  document.getElementById('lockBtn').disabled = false;
+  setLockMsg(message || '');
+  window.scrollTo(0, 0);
+}
+
+/** 「開く」。合言葉が合えば端末を登録し、そのまま通常の起動処理へ入る */
+function submitUnlock() {
+  var btn = document.getElementById('lockBtn');
+  var pass = document.getElementById('lockPass').value;
+  if (!pass) { setLockMsg('合言葉を入力してください'); return; }
+  if (!DEVICE_ID) DEVICE_ID = newDeviceId();
+  btn.disabled = true;
+  setLockMsg('');
+  google.script.run
+    .withSuccessHandler(function (res) {
+      btn.disabled = false;
+      if (!res || !res.ok) { setLockMsg((res && res.message) || '開けませんでした'); return; }
+      setAuth(res.deviceId, res.sig);
+      writeStoredAuth(AUTH);
+      document.getElementById('lockPass').value = '';
+      document.getElementById('lock').hidden = true;
+      startApp();
+    })
+    .withFailureHandler(function (e) {
+      btn.disabled = false;
+      setLockMsg('開けませんでした：' + e.message);
+    })
+    .mrUnlock(pass, DEVICE_ID);
+}
+
+/**
+ * 端末の登録切れ（合言葉が変わった・保存が消えた）を1か所で拾う。
+ * サーバ側 WebApp.js の mrAuthed_ が投げる文言と揃えること。
+ */
+function handleAuthError(e) {
+  var msg = e && e.message ? e.message : String(e === null || e === undefined ? '' : e);
+  if (msg.indexOf('この端末は登録されていません') === -1) return false;
+  // 合言葉は現場スタッフが持っていない。自分で入れ直せる前提の案内にしない
+  // （showLock の中で無効な署名を捨てる）
+  showLock('この端末の登録が必要です。管理者に設定を依頼してください。');
+  return true;
+}
+
+/**
+ * すべての失敗処理の手前に handleAuthError を挟む（Apps Script が配っている画面用）。
+ * 画面には20か所以上のサーバ呼び出しがあり、1つずつ書き足すと必ず漏れるため、
+ * google.script.run が返す入れ物の withFailureHandler を1回だけ包む。
+ * 包めなかったとき（Google側の実装が変わったとき）でも、起動時の呼び出しには
+ * 個別に handleAuthError を書いてあるので入口には戻れる。
+ *
+ * 静的ホストに置いた画面では代役（makeRunner）を使っていて、失敗は
+ * deliverApi が1か所で拾っている。包む相手も必要も無いので何もしない。
+ */
+function wrapFailureHandlers() {
+  if (USING_API_SHIM) return;
+  try {
+    var runner = google.script.run;
+    var owner = Object.prototype.hasOwnProperty.call(runner, 'withFailureHandler')
+      ? runner : Object.getPrototypeOf(runner);
+    if (!owner || typeof owner.withFailureHandler !== 'function') return;
+    var original = owner.withFailureHandler;
+    owner.withFailureHandler = function (fn) {
+      return original.call(this, function (e) {
+        if (handleAuthError(e)) return;
+        if (typeof fn === 'function') fn(e);
+      });
+    };
+  } catch (e) {
+    /* 包めなくても動作は変わらない（登録切れの案内が個別の失敗処理に任される） */
+  }
+}
+
+/**
+ * 起動時。端末IDを用意して、そのまま通常どおり読み込みを始める。
+ * 入口（合言葉）は最初から出さない。サーバが「この端末は登録されていません」を
+ * 返したときだけ handleAuthError が出す（＝合言葉を設定していなければ出ない）。
+ */
+function boot() {
+  wrapFailureHandlers();
+  var stored = readStoredAuth();
+  setAuth((stored && stored.deviceId) || newDeviceId(), stored && stored.sig);
+  writeStoredAuth(AUTH);
+  startApp();
+}
+
+/** 入口を通ったあとの読み込み。ここより前にサーバを呼ばない */
+function startApp() {
+  show('s0');
+  loadEnv();
+  loadLastResult();
+  loadFailedIntake();
+  loadInputChoices();
+  loadDraft();
+  refreshPendingEdit();
+}
+
+// --- 起動時の読み込み ---
+function loadEnv() {
+  google.script.run.withSuccessHandler(renderEnv).withFailureHandler(function (e) {
+    if (handleAuthError(e)) return;
+    document.getElementById('ver').textContent = '設定の読み込みに失敗しました：' + e.message;
+  }).mrGetEnv(authArg());
+}
+
+function loadLastResult() {
+  google.script.run.withSuccessHandler(function (last) {
+    if (last) {
+      state.result = last;
+      document.getElementById('lastBtn').style.display = 'block';
+    }
+  }).withFailureHandler(function (e) { handleAuthError(e); }).mrGetLastResult(authArg());
+}
+
+/**
+ * 前回、入力経路で実行まで失敗した受注があればホームに案内を出す（Task 8c / R10）。
+ * 無ければ何もしない。読み込み失敗も無視する（保険的な案内なので画面を止めない）。
+ */
+function renderFailedIntake(failed) {
+  var box = document.getElementById('failedBanner');
+  if (!failed) return;
+  box.innerHTML = '';
+  var text = document.createElement('div');
+  text.textContent = '前回失敗した受注があります（受注番号 ' + failed.orderNo + '）';
+  box.appendChild(text);
+  var link = document.createElement('a');
+  link.href = failed.sheetUrl;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.textContent = 'シートを開く';
+  box.appendChild(link);
+  // 確認・対応が終わったあとに消す手段が無く、バナーが出たままだった（最終修正波 Deferred→必須）。
+  // 失敗時（withFailureHandler）は何もしない＝バナーを残す。
+  var clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'btn sub';
+  clearBtn.textContent = '消す';
+  clearBtn.onclick = function () {
+    google.script.run
+      .withSuccessHandler(function () { box.style.display = 'none'; })
+      .withFailureHandler(function () { /* 失敗時はバナーを残す */ })
+      .mrClearFailedIntake(authArg());
+  };
+  box.appendChild(clearBtn);
+  box.style.display = 'block';
+}
+function loadFailedIntake() {
+  google.script.run.withSuccessHandler(renderFailedIntake)
+    .withFailureHandler(function (e) { handleAuthError(e); /* ほかの読み込み失敗は無視する */ })
+    .mrGetFailedIntake(authArg());
+}
+
+// 入力フォームの選択肢も起動時に読み込む（Fix round 1 Important#2）。
+// S-Aを開いてから読みに行くと、往復の間に入力を始めた欄がプルダウンへの
+// 差し替えで壊れる（フォーカスが外れてiOSのキーボードが閉じる）ことがある。
+// 起動時に済ませておけば、S-Aを開く時点で選択肢は届いていることが多い。
+function loadInputChoices() {
+  google.script.run.withSuccessHandler(applyInputChoices)
+    .withFailureHandler(function (e) { handleAuthError(e); /* 自由入力のまま使えるので無視する */ })
+    .mrGetInputChoices(authArg());
+}
+
+// 納品時刻の初期値は 09:00〜10:00（value属性なので saForm.reset() でもここへ戻る）。
+// 空欄のままだと iOS の時刻ピッカーが「開いた時刻」から始まり、毎回大きく回すことになる。
+// 開始時刻を変えたら終了時刻を開始＋1時間へ合わせる（終了はその後に手で直せる）。
+// 23時台は日をまたげないので 23:59 で止める。
+function endTimeFromStart(start) {
+  var m = /^(\d{1,2}):(\d{2})$/.exec(start || '');
+  if (!m) return '';
+  var h = Number(m[1]) + 1;
+  if (h > 23) return '23:59';
+  return (h < 10 ? '0' + h : String(h)) + ':' + m[2];
+}
+document.getElementById('inStartTime').addEventListener('change', function () {
+  var end = endTimeFromStart(this.value);
+  if (end) document.getElementById('inEndTime').value = end;
+});
+
+// --- S1 一覧 ---
+function goList(mode) {
+  if (mode) state.mode = mode;
+  show('s1');
+  document.getElementById('s1title').textContent = MODE_LABEL[state.mode];
+  document.getElementById('s1msg').innerHTML = '<div class="alert info">読み込み中…</div>';
+  document.getElementById('s1list').innerHTML = '';
+  google.script.run
+    .withSuccessHandler(renderList)
+    .withFailureHandler(function (e) {
+      document.getElementById('s1msg').innerHTML =
+        '<div class="alert err">読み込みに失敗しました：' + esc(e.message) + '</div>';
+    })
+    .mrListTargets(authArg(), state.mode);
+}
+
+function renderList(res) {
+  state.files = res.files;
+  renderEnv(res);  // 一覧の応答にも反映先が入っているので更新しておく
+  var isNew = (res.mode === 'new');
+  var msg = '';
+  if (res.files.length === 0) {
+    msg = isNew
+      ? '<div class="alert err">作業フォルダに入力ファイルがありません。PCで確認してください。</div>'
+      : '<div class="alert err">受注フォルダに最近更新されたファイルがありません。'
+        + '対象を先にスプレッドシートで開いて編集してください。</div>';
+  } else if (isNew && res.files.length > 1) {
+    msg = '<div class="alert warn">同名ファイルが複数あります。更新日時をよく確認してください。</div>';
+  } else if (!isNew) {
+    msg = '<div class="alert info">更新日時の新しい順に'
+        + res.files.length + '件を表示しています。直前に編集したファイルが先頭です。</div>';
+  }
+  document.getElementById('s1msg').innerHTML = msg;
+
+  document.getElementById('s1list').innerHTML = res.files.map(function (f) {
+    var cls = 'card' + (f.selectable ? '' : ' disabled');
+    // 他の値と同じく esc() を通す。Drive のIDは英数字とハイフン・アンダースコアだけ
+    // だが、外部APIが返す形式に防御を委ねない。
+    var onclick = f.selectable ? ' onclick="goDetail(\'' + esc(f.id) + '\')"' : '';
+    var note = f.selectable ? '' :
+      '<div class="muted">' + (isNew
+        ? 'フラグが「新規」ではありません。ホームの「その他」から「シートで直した変更・キャンセルを反映する」を選んでください。'
+        : 'フラグが「変更」「キャンセル」ではありません。') + '</div>';
+    return '<div class="' + cls + '"' + onclick + '>' +
+      '<div class="row"><span class="k">会社名</span><span class="v">' + esc(f.company) + '</span></div>' +
+      '<div class="row"><span class="k">配達日</span><span class="v">' + esc(f.deliveryDate) + '</span></div>' +
+      '<div class="row"><span class="k">受注番号</span><span class="v">' + esc(f.orderNo) + '</span></div>' +
+      '<div class="row"><span class="k">フラグ</span><span class="v">' +
+        '<span class="flag ' + flagClass(f.flag) + '">' + esc(f.flag || '未選択') + '</span></span></div>' +
+      '<div class="row"><span class="k">更新</span><span class="v">' + esc(f.updatedAt) + '</span></div>' +
+      note + '</div>';
+  }).join('');
+}
+
+// --- S2 確認 ---
+function goDetail(fileId) {
+  state.inputMode = false;
+  state.editFlow = false;
+  state.editResume = false;
+  show('s2');
+  document.getElementById('s2alerts').innerHTML = '<div class="alert info">読み込み中…</div>';
+  document.getElementById('s2detail').innerHTML = '';
+  document.getElementById('s2items').innerHTML = '';
+  document.getElementById('runBtn').disabled = true;
+
+  google.script.run
+    .withSuccessHandler(renderDetail)
+    .withFailureHandler(function (e) {
+      document.getElementById('s2alerts').innerHTML =
+        '<div class="alert err">読み込みに失敗しました：' + esc(e.message) + '</div>';
+    })
+    .mrGetDetail(authArg(), fileId, state.mode);
+}
+
+function renderDetail(res) {
+  state.token = res.token;
+  state.detail = res.detail;
+  var d = res.detail;
+  // 「前 → 後」は変更の確認のときだけ renderEditConfirm が出す
+  document.getElementById('s2diff').hidden = true;
+
+  var alerts = res.blockers.map(function (b) {
+    return '<div class="alert err">⛔ ' + esc(b) + '</div>';
+  }).concat(res.warnings.map(function (w) {
+    return '<div class="alert warn">⚠️ ' + esc(w) + '</div>';
+  }));
+  if (d.inputCorrection) {
+    alerts.push('<div class="alert warn">⚠️ 「入力ミス修正」にチェックが入っています。処理の分岐が変わります。</div>');
+  }
+  document.getElementById('s2alerts').innerHTML = alerts.join('');
+
+  var rows = [
+    ['ファイル名', d.fileNameCell], ['会社名', d.company], ['担当者', d.person],
+    ['配達日', d.deliveryDate], ['納品時間', d.startTime + ' 〜 ' + d.endTime],
+    ['合計食数', d.mealCount], ['合計金額', d.totalAmount ? d.totalAmount + '円' : ''],
+    ['受注番号', d.orderNo], ['支払方法', d.payment],
+    ['注文日', d.orderDate], ['媒体', d.media], ['受渡方法', d.handover], ['配送・集荷担当', d.pickupCarrier],
+    ['連絡有無', d.contactNeeded], ['納品時担当者', d.deliveryStaff], ['但書き', d.receiptNote]
+  ];
+  document.getElementById('s2detail').innerHTML =
+    '<div class="center" style="margin-bottom:12px"><span class="flag ' + flagClass(d.orderType) + '">' +
+      esc(d.orderType || '未選択') + '</span></div>' +
+    rows.map(function (r) {
+      return '<div class="row"><span class="k">' + esc(r[0]) + '</span><span class="v">' + esc(r[1]) + '</span></div>';
+    }).join('');
+
+  document.getElementById('s2items').innerHTML =
+    '<div class="k" style="margin-bottom:8px">商品明細</div>' +
+    (d.items && d.items.length
+      ? d.items.map(function (it) {
+          return '<div class="row"><span class="k">' + esc(it.name) + '</span><span class="v">' +
+                 esc(it.unitPrice) + '円 × ' + esc(it.qty) + '食 ＝ ' + esc(it.amount) + '円</span></div>';
+        }).join('')
+      : '<div class="muted">商品がありません</div>') +
+    '<div class="muted" style="margin-top:12px">' +
+      (state.mode === 'new'
+        ? '反映後に次回用ファイルを作成します。'
+        : 'フラグが「' + esc(d.orderType) + '」のため、次回用ファイルは作成しません。') +
+    '</div>';
+
+  document.getElementById('runBtn').disabled = res.blockers.length > 0;
+}
+
+// --- 実行前の確認（タップ → 確認の窓 → 実行）---
+// 当初は誤実行防止のため1.2秒の長押しにしていたが、iPhoneでは長押しが文字選択・
+// 長押しメニューに奪われて touchcancel になり、反応しないことが多かった。
+// 誤タップ防止は確認の1ステップで担う（2026-09-19 よしさん決定）。
+function openRunConfirm() {
+  if (document.getElementById('runBtn').disabled) return;
+  var d = state.detail || {};
+  var rows = [
+    ['会社名', d.company], ['配達日', d.deliveryDate],
+    ['合計金額', d.totalAmount ? d.totalAmount + '円' : '']
+  ];
+  document.getElementById('rcDetail').innerHTML =
+    '<div class="center" style="margin-bottom:12px"><span class="flag ' + flagClass(d.orderType) + '">' +
+      esc(d.orderType || '未選択') + '</span></div>' +
+    rows.map(function (r) {
+      return '<div class="row"><span class="k">' + esc(r[0]) + '</span><span class="v">' + esc(r[1]) + '</span></div>';
+    }).join('');
+  document.getElementById('rcGo').disabled = false;
+  document.getElementById('runConfirm').hidden = false;
+}
+function closeRunConfirm() {
+  document.getElementById('runConfirm').hidden = true;
+}
+function confirmRun() {
+  var go = document.getElementById('rcGo');
+  if (go.disabled) return;
+  go.disabled = true;   // 連打で doApply が2回走らないようにする（サーバ側でも塞いでいる）
+  closeRunConfirm();
+  doApply();
+}
+
+// --- S3 実行 ---
+function doApply() {
+  show('s3');
+  var t0 = Date.now();
+  state.timer = setInterval(function () {
+    document.getElementById('elapsed').textContent =
+      Math.floor((Date.now() - t0) / 1000) + ' 秒経過';
+  }, 1000);
+
+  var runner = google.script.run
+    .withSuccessHandler(function (r) { clearInterval(state.timer); state.result = r; renderResult(r); })
+    .withFailureHandler(function (e) {
+      clearInterval(state.timer);
+      renderResult({ phase: 'failed', kind: 'unknown', canRetry: false,
+                     message: e.message, nextFile: { created: false, reason: '結果が確認できません' } });
+    });
+  // 動的に関数名を選ぶと、auth を渡し忘れても目視でも検査でも気づけない。
+  // 入口を増やさないため、呼び出しは必ずベタ書きにする。
+  if (state.inputMode) runner.mrRunInput(authArg(), state.token);
+  else runner.mrApply(authArg(), state.token);
+}
+
+// --- S2 戻る（入力モードなら準備済みファイルを片付けてからS-Aへ）---
+function goBackFromConfirm() {
+  if (state.editFlow) {
+    if (state.editResume) {
+      // 「続きから反映する」で来たときは、戻ってもシートを触らない（ホームの案内から選び直せる）
+      state.editFlow = false;
+      state.editResume = false;
+      state.token = null;
+      show('s0');
+      refreshPendingEdit();
+      return;
+    }
+    // 変更・キャンセルの確認から戻るときは、書き換えたシートを先に元へ戻す（第2弾 §6-2）
+    revertAndLeaveConfirm();
+    return;
+  }
+  if (state.inputMode) {
+    google.script.run
+      .withSuccessHandler(function () { /* 片付けは保険。結果は画面に反映しない */ })
+      .withFailureHandler(function () { /* 失敗は無視してよい */ })
+      .mrDiscardPreparedInput(authArg(), state.token);
+    show('sa');
+  } else {
+    goList();
+  }
+}
+
+// --- S4/S5 結果 ---
+var RESULT_TEXT = {
+  done:    { icon: '✅', title: '反映が完了しました', cls: 'info' },
+  stale:   { icon: '⛔', title: '確認後に内容が変わりました', cls: 'err' },
+  expired: { icon: '⌛', title: '有効期限が切れました', cls: 'err' },
+  busy:    { icon: '⏳', title: 'ほかの実行が進行中です', cls: 'warn' },
+  blocked: { icon: '⛔', title: '実行できない状態でした', cls: 'err' },
+  running: { icon: '⏳', title: '実行中です', cls: 'warn' },
+  failed:  { icon: '❌', title: '反映に失敗しました', cls: 'err' }
+};
+var KIND_TEXT = {
+  auth:     '設定に問題があります（秘密キー）。管理者へ連絡してください。',
+  master:   '設定に問題があります（マスタ未登録）。管理者へ連絡してください。',
+  busy:     'サーバーが混み合っています。1分ほど待ってからやり直してください。',
+  calendar: 'カレンダー登録で失敗しました。受注一覧表には既に反映されています。<strong>再実行すると二重登録になります。</strong>PCで確認してください。',
+  html:     'Google側で処理が停止しました。管理者へ連絡してください。',
+  unknown:  '<strong>結果が確認できません。</strong>反映が完了している可能性があります。再実行せず、PCで受注一覧表を確認してください。',
+  blocked:  '実行前の確認で問題が見つかったため、<strong>何も実行していません。</strong>下の内容を直してからやり直してください。'
+};
+
+function renderResult(r) {
+  show('s4');
+  // 入力経路で反映まで完了したら下書きは不要。失敗のときは残す（直して再実行できるように）。
+  if (state.inputMode && r && r.phase === 'done') {
+    DRAFT_FORM = null;
+    if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+    google.script.run.withFailureHandler(function () {}).mrClearDraft(authArg());
+  }
+  // 変更・キャンセルの流れ：完了なら未反映の記録はサーバ側で消えている。
+  // 失敗なら記録が残るので、ホームの案内を取り直す。
+  if (state.editFlow && r) {
+    // カレンダーだけ失敗＝受注一覧表は更新済み。ここでシートを元へ戻すと一覧表と食い違う
+    if (r.kind === 'calendar') state.noRevertSsId = currentEditSsId();
+    if (r.phase === 'done') { renderPendingEdit(null); } else { refreshPendingEdit(); }
+  }
+  var t = RESULT_TEXT[r.phase] || RESULT_TEXT.failed;
+  document.getElementById('rIcon').textContent = t.icon;
+  document.getElementById('rTitle').textContent = t.title;
+
+  var alerts = [];
+  // 入力経路では一覧表に反映できていてもカレンダー登録だけ失敗すると phase は done のまま
+  // kind が calendar になる。完了の青枠ではなく警告色で出す（再実行すると二重登録になる）
+  var kindCls = (r.phase === 'done' && r.kind === 'calendar') ? 'warn' : t.cls;
+  if (KIND_TEXT[r.kind]) alerts.push('<div class="alert ' + kindCls + '">' + KIND_TEXT[r.kind] + '</div>');
+  // blocked / stale / expired / busy はAPIを叩く前に止めているので、
+  // 現場表紙の書き換えは起きていない。無用な不安を与えないよう出し分ける。
+  var NOT_SENT = { blocked: 1, stale: 1, expired: 1, busy: 1 };
+  if (r.phase !== 'done' && !NOT_SENT[r.phase]) {
+    // Task_Api.js:305-322 が manualOrder より前に現場表紙AQ列を書き換え、巻き戻さない。
+    alerts.push('<div class="alert warn">現場表紙のAQ列は、この失敗より前に書き換わっている場合があります。' +
+                'ファイル名・保存場所も変わっている可能性があります。PCで確認してください。</div>');
+  }
+  if (r.phase === 'blocked' || r.phase === 'stale') {
+    alerts.push('<div class="alert info">APIを呼ぶ前に止めたため、'
+              + '受注一覧表・カレンダー・現場表紙はいずれも変わっていません。</div>');
+  }
+  if (r.canRetry) {
+    alerts.push('<div class="alert info">時間をおいて、最初からやり直せます。</div>');
+  }
+  document.getElementById('rAlerts').innerHTML = alerts.join('');
+
+  var nf = r.nextFile || {};
+  document.getElementById('rNext').innerHTML =
+    '<div class="row"><span class="k">次回用ファイル</span><span class="v">' +
+    (nf.created ? '作成しました' : esc(nf.reason || '作成していません')) + '</span></div>' +
+    (nf.error ? '<div class="muted">' + esc(nf.error) + '</div>' : '');
+
+  document.getElementById('rDetail').textContent = r.message || '';
+  // 詳細は原因調査用。完了時は現場に不要なので隠し、失敗系と
+  // 「一覧表は反映済みだがカレンダーだけ失敗」のときだけ出す（2026-09-19 よしさん決定）。
+  // 前の結果で開いたままにならないよう、毎回たたんだ状態へ戻す。
+  document.getElementById('rDetail').style.display = 'none';
+  document.getElementById('rDetailBox').hidden = !shouldShowDetail(r);
+}
+
+function shouldShowDetail(r) {
+  return r.phase !== 'done' || r.kind === 'calendar';
+}
+
+function showLast() { renderResult(state.result); }
+function toggleDetail() {
+  var el = document.getElementById('rDetail');
+  el.style.display = (el.style.display === 'none' ? 'block' : 'none');
+}
+
+// HtmlService のiframeでは navigator.clipboard が権限拒否されるため execCommand を使う。
+function copyDetail() {
+  var ta = document.createElement('textarea');
+  ta.value = document.getElementById('rDetail').textContent;
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); alert('コピーしました'); }
+  catch (e) { alert('コピーできませんでした。詳細を長押しして選択してください。'); }
+  document.body.removeChild(ta);
+}
+
+function reset() {
+  state.token = null; state.detail = null; state.inputMode = false; state.inputForm = null;
+  // 変更・キャンセルの流れを終える。変更モードの値を新規の入力へ持ち越さない
+  var wasEdit = state.editFlow || state.editMode;
+  leaveEditMode();
+  state.editFlow = false; state.editResume = false; state.editKind = '';
+  state.editSel = null; state.editOrder = null;
+  if (wasEdit) refreshPendingEdit();
+  // 完了→最初に戻る、のときは次の新規入力が前回の値のまま始まらないようにする
+  // （Fix round 1 Important#1）。確認画面の「戻る」＝goBackFromConfirm はこの
+  // 関数を呼ばないため、Step 5bの「値を残す」動作とは両立する。
+  clearInputForm();
+  show('s0');
+}
+
+// ---------------------------------------------------------------
+// S-A 新規受注の入力（Task 10）
+//
+// ここにあるのは画面の組み立てだけ。検証・正規化は一切行わない
+// （Logic_MobileRun.js 側の mrValidateInputForm_ / mrBuildIntakeInput_ が担う）。
+// ---------------------------------------------------------------
+var INPUT_CHOICES = { shopNames: [], payments: [], itemCodes: [] };
+// 追加項目の初期値（原本に入っている値）。媒体は毎回選ばせるので含まれない。
+var INPUT_DEFAULTS = {};
+var DEFAULT_FIELDS = [
+  ['inContactNeeded', 'contactNeeded'], ['inHandover', 'handover'],
+  ['inDeliveryStaff', 'deliveryStaff'], ['inPickupCarrier', 'pickupCarrier'],
+  ['inReceiptNote', 'receiptNote']
+];
+
+function todayIso() {
+  var t = new Date();
+  function p(n) { return n < 10 ? '0' + n : String(n); }
+  return t.getFullYear() + '-' + p(t.getMonth() + 1) + '-' + p(t.getDate());
+}
+
+// 空の欄にだけ初期値を入れる（入力済みの値は上書きしない）
+function applyInputDefaults() {
+  // 変更モードでは初期値を入れない（空だった欄に値が入ると、変えていないのに変更点になる）
+  if (state.editMode) return;
+  // 注文日は今日を初期値にする（原本の値は前の受注の日付が残りうるので使わない）
+  var od = document.getElementById('inOrderDate');
+  if (od && od.value === '') od.value = todayIso();
+  DEFAULT_FIELDS.forEach(function (pair) {
+    var el = document.getElementById(pair[0]);
+    if (el && el.value === '' && INPUT_DEFAULTS[pair[1]]) el.value = INPUT_DEFAULTS[pair[1]];
+  });
+}
+
+function goInput() {
+  // 変更モードのまま新規の入力へ入らない（登録済みの受注の値が新規へ混ざるのを防ぐ）
+  if (state.editMode) leaveEditMode();
+  state.editFlow = false;
+  state.editResume = false;
+  state.inputMode = true;
+  show('sa');
+  // 選択肢は起動ブロックで読み込み済み（読み込み中でも自由入力欄として使える）。
+  // ここでは商品行が0行のとき（初回、または完了後にclearInputForm()で
+  // 空にした直後）だけ1行を用意する。既に行があれば増やさない
+  // （goHomeFromInput()で戻ってから開き直しても行が増殖しないようにする）。
+  if (document.getElementById('inItems').querySelectorAll('.itemRow').length === 0) {
+    addItemRow();
+  }  // まだ何も入力していなければ、保存してある下書きを戻す
+  if (!formTouched && DRAFT_FORM) restoreDraft();
+  // 選択肢の読み込みに失敗していても、注文日（今日）だけは入れておく
+  applyInputDefaults();
+}
+
+// ---------------------------------------------------------------
+// 入力途中の下書き（サーバ側に利用者ごとに保存。mrSaveDraft / mrGetDraft / mrClearDraft）
+// ---------------------------------------------------------------
+// スマホはアプリを切り替えるとタブが破棄されることがあり、入力が消える。
+// 入力のたびに約2秒後に自動保存し、開き直したら続きから入力できるようにする。
+var DRAFT_FORM = null;      // 手元に持っている最新の下書き（失敗して戻ってきたときの復元にも使う）
+var formTouched = false;    // 利用者が入力欄を触ったか（触ったあとは下書きで上書きしない）
+var draftTimer = null;
+var DRAFT_TEXT_FIELDS = [
+  ['inShopName', 'shopName'], ['inDeliveryDate', 'deliveryDate'], ['inStartTime', 'startTime'],
+  ['inEndTime', 'endTime'], ['inOrderDate', 'orderDate'], ['inCompanyName', 'companyName'],
+  ['inPersonName', 'personName'], ['inPhone', 'phone'], ['inAddress1', 'address1'],
+  ['inAddress2', 'address2'], ['inMedia', 'media'], ['inPayment', 'payment'],
+  ['inHandover', 'handover'], ['inPickupCarrier', 'pickupCarrier'], ['inOrderNo', 'orderNo'],
+  ['inContactNote', 'contactNote'], ['inContactNeeded', 'contactNeeded'],
+  ['inDeliveryStaff', 'deliveryStaff'], ['inReceiptNote', 'receiptNote']
+];
+
+function saveDraftNow() {
+  // 変更モードでは下書きを保存しない（新規の下書きと混ざるのを避ける。第2弾 §8）
+  if (state.editMode) return;
+  if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+  DRAFT_FORM = collectInputForm();
+  google.script.run
+    .withSuccessHandler(function () { /* 保存の成否は画面に出さない（入力を邪魔しない） */ })
+    .withFailureHandler(function () { /* 失敗しても入力は続けられる */ })
+    .mrSaveDraft(authArg(), DRAFT_FORM);
+}
+
+function scheduleDraftSave() {
+  if (state.editMode) return;   // 変更モードでは下書きを保存しない
+  formTouched = true;
+  if (draftTimer) clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraftNow, 2000);
+}
+
+function restoreDraft() {
+  if (state.editMode) return;   // 変更モードのフォームへ新規の下書きを流し込まない
+  var f = DRAFT_FORM;
+  if (!f) return;
+  DRAFT_TEXT_FIELDS.forEach(function (pair) {
+    var el = document.getElementById(pair[0]);
+    if (!el || f[pair[1]] == null || f[pair[1]] === '') return;
+    // 選択肢がまだ届いていない欄は自由入力のままなので値が入る。プルダウンに
+    // 差し替わるとき buildChoiceField が値を引き継ぐ。
+    el.value = f[pair[1]];
+  });
+  var items = (f.items || []).filter(function (it) { return it && (it.code || it.quantity); });
+  if (items.length > 0) {
+    document.getElementById('inItems').innerHTML = '';
+    items.forEach(function (it) {
+      addItemRow();
+      var rows = document.getElementById('inItems').querySelectorAll('.itemRow');
+      var row = rows[rows.length - 1];
+      if (!row) return;
+      row.querySelector('.itemCode').value = it.code || '';
+      row.querySelector('.itemQty').value = it.quantity ? it.quantity : '';
+    });
+  }
+  formTouched = true;
+  document.getElementById('draftBanner').hidden = false;
+}
+
+function discardDraft() {
+  DRAFT_FORM = null;
+  if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+  google.script.run.withFailureHandler(function () {}).mrClearDraft(authArg());
+  clearInputForm();
+}
+
+// 入力欄のどれかを触ったら保存を予約する（商品行は後から増えるので form でまとめて受ける）
+document.getElementById('saForm').addEventListener('input', scheduleDraftSave);
+document.getElementById('saForm').addEventListener('change', scheduleDraftSave);
+
+// 起動時に下書きを取りに行く。入力画面を開いていて未入力なら、届いた時点で戻す。
+function loadDraft() {
+  google.script.run.withSuccessHandler(function (d) {
+    if (!d || !d.form) return;
+    DRAFT_FORM = d.form;
+    if (state.inputMode && !formTouched) restoreDraft();
+  }).withFailureHandler(function (e) { handleAuthError(e); /* 下書きが読めなくても入力はできる */ })
+    .mrGetDraft(authArg());
+}
+
+// S-Aの「戻る」：goInput()で立てた inputMode を解除してからホームへ（Fix round 1 Minor#3）
+function goHomeFromInput() {
+  if (state.editMode) {
+    // 変更モードの「戻る」：まだシートには何も書いていないので、片付けて受注の表示へ戻るだけ
+    leaveEditMode();
+    show('sv');
+    return;
+  }
+  state.inputMode = false;
+  show('s0');
+}
+
+/**
+ * S-Aの入力内容を初期状態に戻す（Fix round 1 Important#1）。
+ * 「完了→最初に戻る」のときに呼ばれ、次の新規入力が前回の値
+ * （納品日・会社名・住所・受注番号や商品行など）のまま始まるのを防ぐ。
+ * 確認画面の「戻る」（goBackFromConfirm）はこの関数を呼ばないため、
+ * Step 5bの「値を残す」動作とは影響し合わない。
+ */
+function clearInputForm() {
+  document.getElementById('saForm').reset();
+  document.getElementById('inItems').innerHTML = '';
+  addItemRow();
+  document.getElementById('saErrors').innerHTML = '';
+  document.getElementById('draftBanner').hidden = true;
+  formTouched = false;
+  applyInputDefaults();
+}
+
+/**
+ * 選択肢があればプルダウン、無ければ自由入力の要素を作る
+ * （Task 8b の mrGetInputChoices は入力規則の無いフィールドで空配列を返すことがある）。
+ */
+function buildChoiceField(cls, choices, savedValue) {
+  var el;
+  if (choices && choices.length > 0) {
+    el = document.createElement('select');
+    var blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = '選択してください';
+    el.appendChild(blank);
+    choices.forEach(function (c) {
+      var opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      el.appendChild(opt);
+    });
+  } else {
+    el = document.createElement('input');
+    el.type = 'text';
+  }
+  el.className = cls;
+  if (savedValue) {
+    // 変更モードで、シートの値がプルダウンに無いとき（PCで自由入力した値）は選択肢に足す。
+    // 足さないと欄が空になり、変えていないのに「空へ変更」として扱われる。
+    if (state.editMode && el.tagName === 'SELECT') ensureSelectOption(el, savedValue);
+    el.value = savedValue;
+  }
+  return el;
+}
+
+/**
+ * 既存の欄をプルダウン（または自由入力）へ差し替える。
+ * フォーカス中の要素は差し替えない（Fix round 1 Important#2）。差し替えは
+ * 要素をDOMから外して新しい要素に入れ替えるため、入力中にそれをやると
+ * iOSでフォーカスが外れてキーボードが閉じ、打っていた文字も失われる。
+ * placeholder も引き継ぐ（Fix round 1 Minor#4。引き継がないと、選択肢が
+ * 空で自由入力に戻したときに商品略語などのヒントが消える）。
+ */
+function replaceChoiceField(oldEl, choices) {
+  if (document.activeElement === oldEl) {
+    // 入力中は差し替えないが、そのままだと自由入力欄のまま残る。
+    // フォーカスが外れたときに1回だけやり直す。
+    oldEl.addEventListener('blur', function () { replaceChoiceField(oldEl, choices); }, { once: true });
+    return oldEl;
+  }
+  var newEl = buildChoiceField(oldEl.className, choices, oldEl.value);
+  newEl.id = oldEl.id;
+  newEl.required = oldEl.required;
+  newEl.disabled = oldEl.disabled;   // 変更モードの読み取り専用を差し替え後も保つ
+  if (oldEl.getAttribute('aria-label')) newEl.setAttribute('aria-label', oldEl.getAttribute('aria-label'));
+  if (oldEl.placeholder && newEl.tagName === 'INPUT') newEl.placeholder = oldEl.placeholder;
+  oldEl.parentNode.replaceChild(newEl, oldEl);
+  return newEl;
+}
+
+/**
+ * 入力フォームのプルダウン選択肢を起動時に読み込む（起動ブロック参照。
+ * Fix round 1 Important#2）。失敗しても自由入力欄のまま使えるので、
+ * エラーは画面に出さず無視する。
+ */
+function applyInputChoices(choices) {
+  INPUT_CHOICES = choices || { shopNames: [], payments: [], itemCodes: [] };
+  replaceChoiceField(document.getElementById('inShopName'), INPUT_CHOICES.shopNames);
+  replaceChoiceField(document.getElementById('inPayment'), INPUT_CHOICES.payments);
+  replaceChoiceField(document.getElementById('inMedia'), INPUT_CHOICES.medias);
+  replaceChoiceField(document.getElementById('inHandover'), INPUT_CHOICES.handovers);
+  replaceChoiceField(document.getElementById('inPickupCarrier'), INPUT_CHOICES.pickupCarriers);
+  replaceChoiceField(document.getElementById('inContactNeeded'), INPUT_CHOICES.contactNeededs);
+  INPUT_DEFAULTS = INPUT_CHOICES.defaults || {};
+  applyInputDefaults();
+  var codeEls = document.getElementById('inItems').querySelectorAll('.itemCode');
+  for (var i = 0; i < codeEls.length; i++) {
+    replaceChoiceField(codeEls[i], INPUT_CHOICES.itemCodes);
+  }
+}
+
+// 商品行は「＋ 商品を追加」で増やし、最大 MAX_ITEMS 行（MR_CONST.MAX_ITEMS と対応）
+function addItemRow() {
+  var wrap = document.getElementById('inItems');
+  if (wrap.querySelectorAll('.itemRow').length >= MAX_ITEMS) return;
+
+  var row = document.createElement('div');
+  row.className = 'itemRow';
+
+  var codeEl = buildChoiceField('itemCode', INPUT_CHOICES.itemCodes, null);
+  codeEl.required = true;
+  codeEl.setAttribute('aria-label', '商品略語');
+  if (codeEl.tagName === 'INPUT') codeEl.placeholder = '商品略語';
+
+  var qtyEl = document.createElement('input');
+  qtyEl.type = 'number';
+  qtyEl.className = 'itemQty';
+  qtyEl.inputMode = 'numeric';
+  qtyEl.min = '1';
+  qtyEl.step = '1';
+  qtyEl.required = true;
+  qtyEl.placeholder = '個数';
+  qtyEl.setAttribute('aria-label', '個数');
+
+  var delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'removeItem';
+  delBtn.textContent = '×';
+  delBtn.setAttribute('aria-label', '商品を削除');
+  delBtn.onclick = function () {
+    wrap.removeChild(row);
+    updateAddItemBtn();
+    scheduleDraftSave();   // 行の削除は input イベントが出ないので明示的に保存を予約する
+  };
+
+  row.appendChild(codeEl);
+  row.appendChild(qtyEl);
+  row.appendChild(delBtn);
+  wrap.appendChild(row);
+  updateAddItemBtn();
+}
+
+function updateAddItemBtn() {
+  var count = document.getElementById('inItems').querySelectorAll('.itemRow').length;
+  document.getElementById('addItemBtn').disabled =
+    (count >= MAX_ITEMS) || (state.editMode && !state.editItemsEditable);
+}
+
+// フォームの値を集めるだけ。検証・整形はサーバ（Logic_MobileRun.js）で行う。
+function collectInputForm() {
+  var items = [];
+  var rows = document.getElementById('inItems').querySelectorAll('.itemRow');
+  for (var i = 0; i < rows.length; i++) {
+    var codeEl = rows[i].querySelector('.itemCode');
+    var qtyEl = rows[i].querySelector('.itemQty');
+    items.push({ code: codeEl.value, quantity: Number(qtyEl.value) });
+  }
+  return {
+    shopName: document.getElementById('inShopName').value,
+    deliveryDate: document.getElementById('inDeliveryDate').value,
+    startTime: document.getElementById('inStartTime').value,
+    endTime: document.getElementById('inEndTime').value,
+    companyName: document.getElementById('inCompanyName').value,
+    personName: document.getElementById('inPersonName').value,
+    phone: document.getElementById('inPhone').value,
+    address1: document.getElementById('inAddress1').value,
+    address2: document.getElementById('inAddress2').value,
+    payment: document.getElementById('inPayment').value,
+    contactNote: document.getElementById('inContactNote').value,
+    orderDate: document.getElementById('inOrderDate').value,
+    media: document.getElementById('inMedia').value,
+    contactNeeded: document.getElementById('inContactNeeded').value,
+    handover: document.getElementById('inHandover').value,
+    deliveryStaff: document.getElementById('inDeliveryStaff').value,
+    pickupCarrier: document.getElementById('inPickupCarrier').value,
+    receiptNote: document.getElementById('inReceiptNote').value,
+    orderNo: document.getElementById('inOrderNo').value,
+    items: items
+  };
+}
+
+function renderInputErrors(errors) {
+  var box = document.getElementById('saErrors');
+  box.innerHTML = '';
+  (errors || []).forEach(function (msg) {
+    var div = document.createElement('div');
+    div.className = 'alert err';
+    div.textContent = msg;
+    box.appendChild(div);
+  });
+  // 長いフォームの下の方で送信すると、先頭に出たエラーが画面外になって気づけない
+  // （最終修正波 Minor#9）。
+  if (box.scrollIntoView) { box.scrollIntoView(); } else { window.scrollTo(0, 0); }
+}
+
+function goConfirmInput() {
+  var btn = document.getElementById('saSubmitBtn');
+  if (btn.disabled) return;  // 連打による二重送信（＝孤児ファイル）を防ぐ
+  var form = collectInputForm();
+  // 確認へ進む時点の内容を必ず保存する（この先で失敗しても、最新の内容から直せるように）
+  saveDraftNow();
+  document.getElementById('saErrors').innerHTML = '';
+  btn.disabled = true;
+  btn.textContent = '確認中…';
+
+  function restore() { btn.disabled = false; btn.textContent = '確認へ'; }
+
+  google.script.run
+    .withSuccessHandler(function (res) {
+      restore();
+      if (!res.ok) { renderInputErrors(res.errors); return; }
+      state.token = res.token;
+      state.inputMode = true;
+      state.inputForm = form;
+      renderInputConfirm(res);
+      show('s2');
+    })
+    .withFailureHandler(function (e) {
+      restore();
+      renderInputErrors([e.message]);
+    })
+    .mrPrepareInput(authArg(), form);
+}
+
+/**
+ * S-Aから送った入力を確認画面（既存の#s2）へ描く。
+ * 反映経路の renderDetail とは別の関数にしてあるので、既存の反映経路の
+ * 表示は一切変えない。
+ */
+// 日付欄の値（2026-09-23）を、シートと同じ表記（2026/09/23）で見せる
+function slashDate(v) { return String(v == null ? '' : v).replace(/-/g, '/'); }
+
+function renderInputConfirm(res) {
+  var computed = res.computed || {};
+  document.getElementById('s2diff').hidden = true;
+
+  var alertsBox = document.getElementById('s2alerts');
+  alertsBox.innerHTML = '';
+  (res.warnings || []).forEach(function (w) {
+    var div = document.createElement('div');
+    div.className = 'alert warn';
+    div.textContent = '⚠️ ' + w;
+    alertsBox.appendChild(div);
+  });
+
+  document.getElementById('runBtn').disabled = false;
+  // 請求金額が0（数式未確定・空を含む）のまま実行させない。
+  // 判定は mrIsZeroAmount_（Logic_MobileRun.js）へ寄せてあり、res.zeroAmount で受け取る。
+  if (res.zeroAmount) {
+    var errDiv = document.createElement('div');
+    errDiv.className = 'alert err';
+    errDiv.textContent = '請求金額が0です。商品と個数を確認してください。';
+    alertsBox.appendChild(errDiv);
+    document.getElementById('runBtn').disabled = true;
+  }
+
+  var detail = document.getElementById('s2detail');
+  detail.innerHTML = '';
+  function addRow(k, v) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    var kEl = document.createElement('span');
+    kEl.className = 'k';
+    kEl.textContent = k;
+    var vEl = document.createElement('span');
+    vEl.className = 'v';
+    vEl.textContent = (v === null || v === undefined) ? '' : String(v);
+    row.appendChild(kEl);
+    row.appendChild(vEl);
+    detail.appendChild(row);
+  }
+  // 実行前の確認の窓（openRunConfirm）は state.detail を読む。入力経路でも同じ形で持たせる
+  // （持たせないと、窓の会社名・配達日・合計金額が空になる。2026-09-19 実機で発覚）。
+  var f = state.inputForm || {};
+  state.detail = {
+    company: f.companyName, deliveryDate: slashDate(f.deliveryDate),
+    totalAmount: computed.totalAmount, orderType: '新規'
+  };
+
+  addRow('ファイル名', computed.fileName);
+  // 入力した内容をそのまま見せる（シートへ書いた値。打ち間違いに実行前に気づけるように）
+  addRow('屋号', f.shopName);
+  addRow('会社名', f.companyName);
+  addRow('担当者', f.personName);
+  addRow('納品日', slashDate(f.deliveryDate));
+  addRow('納品時間', (f.startTime || '') + ' 〜 ' + (f.endTime || ''));
+  addRow('注文日', slashDate(f.orderDate));
+  addRow('媒体', f.media);
+  addRow('支払方法', f.payment);
+  addRow('受渡方法', f.handover);
+  addRow('配送・集荷担当', f.pickupCarrier);
+  addRow('連絡有無', f.contactNeeded);
+  addRow('納品時担当者', f.deliveryStaff);
+  addRow('但書き', f.receiptNote);
+  addRow('合計食数', computed.mealCount);
+  addRow('合計金額', computed.totalAmount ? computed.totalAmount + '円' : '');
+  addRow('カレンダータイトル', computed.eventTitle);
+  addRow('受注番号', res.orderNo);
+
+  var linkRow = document.createElement('div');
+  linkRow.className = 'row';
+  var linkK = document.createElement('span');
+  linkK.className = 'k';
+  linkK.textContent = 'シート';
+  var linkV = document.createElement('span');
+  linkV.className = 'v';
+  var a = document.createElement('a');
+  a.href = res.sheetUrl;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = 'シートを開く';
+  linkV.appendChild(a);
+  linkRow.appendChild(linkK);
+  linkRow.appendChild(linkV);
+  detail.appendChild(linkRow);
+
+  var itemsBox = document.getElementById('s2items');
+  itemsBox.innerHTML = '';
+  var itemsTitle = document.createElement('div');
+  itemsTitle.className = 'k';
+  itemsTitle.style.marginBottom = '8px';
+  itemsTitle.textContent = '商品明細';
+  itemsBox.appendChild(itemsTitle);
+
+  // サーバは金額の内訳を返さないため、入力した略語×個数をそのまま並べる
+  var items = (state.inputForm && state.inputForm.items) || [];
+  if (items.length === 0) {
+    var none = document.createElement('div');
+    none.className = 'muted';
+    none.textContent = '商品がありません';
+    itemsBox.appendChild(none);
+  } else {
+    items.forEach(function (it) {
+      var row = document.createElement('div');
+      row.className = 'row';
+      var kEl = document.createElement('span');
+      kEl.className = 'k';
+      kEl.textContent = it.code;
+      var vEl = document.createElement('span');
+      vEl.className = 'v';
+      vEl.textContent = it.quantity + ' 食';
+      row.appendChild(kEl);
+      row.appendChild(vEl);
+      itemsBox.appendChild(row);
+    });
+  }
+  var note = document.createElement('div');
+  note.className = 'muted';
+  note.style.marginTop = '12px';
+  note.textContent = '入力経路では次回用ファイルを作成しません。';
+  itemsBox.appendChild(note);
+}
+
+// ---------------------------------------------------------------
+// 第2弾：登録済みの受注の変更・キャンセル
+// （設計書 docs/superpowers/specs/2026-09-19-mobile-input-phase2-design.md §3・§5・§6-2・§8）
+//
+// 第1弾との決定的な違いは「登録済みのシートを書き換える」こと。
+// mrPrepareEdit が成功した時点でシートは書き換わっているので、確認画面から
+// 戻るときは必ず mrRevertPendingEdit で元へ戻してから画面を移す。
+// ここでも検証・差分の計算はしない（サーバ側の mrValidateEditForm_ / mrDiffEditForm_ が担う）。
+// ---------------------------------------------------------------
+
+// 変更モードで直せない欄（第2弾 §5「表示のみ」）。受注番号を変えると別案件になり二重登録になる。
+var EDIT_READONLY_IDS = ['inOrderNo', 'inShopName', 'inMedia', 'inOrderDate'];
+var EDIT_SUBMIT_LABEL = '変更内容を確認へ';
+var NEW_SUBMIT_LABEL = '確認へ';
+
+function mkEl(tag, cls, text) {
+  var el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text !== undefined && text !== null) el.textContent = String(text);
+  return el;
+}
+function mkAlert(cls, text) { return mkEl('div', 'alert ' + cls, text); }
+function mkSheetLink(url) {
+  var a = mkEl('a', '', 'シートを開く');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  return a;
+}
+function mkRow(k, v) {
+  var row = mkEl('div', 'row');
+  row.appendChild(mkEl('span', 'k', k));
+  row.appendChild(mkEl('span', 'v', (v === null || v === undefined) ? '' : v));
+  return row;
+}
+function pad2(n) { n = Number(n); return n < 10 ? '0' + n : String(n); }
+
+// シートの表示値（2026/9/29・2026-09-29）を <input type=date> 用（2026-09-29）へ。読めなければ空
+function toHtmlDate(v) {
+  var m = /^\s*(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/.exec(String(v == null ? '' : v));
+  return m ? m[1] + '-' + pad2(m[2]) + '-' + pad2(m[3]) : '';
+}
+// シートの表示値（9:00・13:00:00）を <input type=time> 用（09:00）へ。読めなければ空
+function toHtmlTime(v) {
+  var m = /^\s*(\d{1,2}):(\d{2})/.exec(String(v == null ? '' : v));
+  return m ? pad2(m[1]) + ':' + m[2] : '';
+}
+// カレンダーの開始時刻（UTCのISO文字列）を日本時間の M/D HH:mm で見せる。端末の時刻設定に頼らない
+function fmtJst(iso) {
+  var t = Date.parse(iso || '');
+  if (isNaN(t)) return '';
+  var d = new Date(t + 9 * 60 * 60 * 1000);
+  return (d.getUTCMonth() + 1) + '/' + d.getUTCDate() + ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes());
+}
+
+// プルダウンに無い値を選択肢へ足す（変更モードだけ。leaveEditMode で取り除く）
+function ensureSelectOption(sel, value) {
+  for (var i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === value) return;
+  }
+  var opt = document.createElement('option');
+  opt.value = value;
+  opt.textContent = value;
+  opt.setAttribute('data-edit-extra', '1');
+  sel.appendChild(opt);
+}
+function setFieldValue(el, value) {
+  var v = String(value == null ? '' : value);
+  if (el.tagName === 'SELECT' && v !== '') ensureSelectOption(el, v);
+  el.value = v;
+}
+
+function currentEditSsId() {
+  if (state.editSel && state.editSel.ssId) return state.editSel.ssId;
+  if (state.pendingEdit && state.pendingEdit.ssId) return state.pendingEdit.ssId;
+  return '';
+}
+
+// --- 書き換えたまま未反映の受注（ホームの案内）---
+function renderPendingEdit(p) {
+  var box = document.getElementById('pendingBanner');
+  box.innerHTML = '';
+  if (!p || !p.ssId) {
+    state.pendingEdit = null;
+    box.style.display = 'none';
+    return;
+  }
+  state.pendingEdit = p;
+  box.appendChild(mkEl('div', '', '書き換えたまま未反映の受注があります（受注番号 ' + (p.orderNo || '不明') + '）'));
+  if (p.sheetUrl) box.appendChild(mkSheetLink(p.sheetUrl));
+  var msg = mkEl('div', 'muted', '');
+  msg.id = 'pendingMsg';
+  box.appendChild(msg);
+
+  var resumeBtn = mkEl('button', 'btn sub', '続きから反映する');
+  resumeBtn.type = 'button';
+  resumeBtn.id = 'pendingResumeBtn';
+  resumeBtn.onclick = resumePendingEdit;
+
+  if (p.uncertain) {
+    // 結果が確認できなかった実行のあと。反映済みかもしれないので、元に戻す・続きからは出さない
+    box.firstChild.textContent = '反映できたか確認できていない受注があります（受注番号 ' + (p.orderNo || '不明') + '）';
+    msg.textContent = '反映が完了している可能性があります。PCで受注一覧表とカレンダーを確認してください。'
+      + '再実行や元に戻す操作はアプリからはできません。';
+    var dismissBtn = mkEl('button', 'btn sub', '確認したので、この案内を消す');
+    dismissBtn.type = 'button';
+    dismissBtn.id = 'pendingDismissBtn';
+    dismissBtn.style.marginTop = '8px';
+    dismissBtn.style.marginBottom = '0';
+    dismissBtn.onclick = function () {
+      dismissBtn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function () { renderPendingEdit(null); })
+        .withFailureHandler(function (e) { dismissBtn.disabled = false; setPendingMsg('消せませんでした: ' + e.message); })
+        .mrDismissPendingEdit(authArg());
+    };
+    box.appendChild(dismissBtn);
+    box.style.display = 'block';
+    return;
+  }
+  if (state.noRevertSsId && state.noRevertSsId === p.ssId) {
+    // 受注一覧表には反映済み。シートだけ元へ戻すと一覧表と食い違うので「元に戻す」は出さない
+    msg.textContent = 'この受注は受注一覧表へ反映済みのため、元に戻せません。PCで確認してください。';
+  } else {
+    var revertBtn = mkEl('button', 'btn sub', '元に戻す');
+    revertBtn.type = 'button';
+    revertBtn.id = 'pendingRevertBtn';
+    revertBtn.style.marginTop = '8px';
+    revertBtn.onclick = revertPendingFromHome;
+    box.appendChild(revertBtn);
+  }
+  resumeBtn.style.marginTop = '8px';
+  resumeBtn.style.marginBottom = '0';
+  box.appendChild(resumeBtn);
+  box.style.display = 'block';
+}
+function setPendingMsg(text) {
+  var el = document.getElementById('pendingMsg');
+  if (el) el.textContent = text;
+}
+function setPendingBusy(busy) {
+  ['pendingRevertBtn', 'pendingResumeBtn'].forEach(function (id) {
+    var b = document.getElementById(id);
+    if (b) b.disabled = busy;
+  });
+}
+function refreshPendingEdit() {
+  google.script.run
+    .withSuccessHandler(renderPendingEdit)
+    .withFailureHandler(function () { /* 読めなくても画面は止めない（サーバ側でも二重の書き換えは拒否する） */ })
+    .mrGetPendingEdit(authArg());
+}
+// 起動時の確認は startApp() から呼ぶ（入口を通る前にサーバを呼ばないため）
+
+// ホームの「元に戻す」
+function revertPendingFromHome() {
+  setPendingBusy(true);
+  setPendingMsg('元に戻しています…');
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (r && r.reverted) { renderPendingEdit(null); return; }
+      setPendingBusy(false);
+      setPendingMsg('元に戻せませんでした：' + ((r && r.message) || '原因不明') + '　シートを開いて確認してください。');
+    })
+    .withFailureHandler(function (e) {
+      setPendingBusy(false);
+      setPendingMsg('元に戻せませんでした：' + e.message + '　シートを開いて確認してください。');
+    })
+    .mrRevertPendingEdit(authArg());
+}
+
+// ホームの「続きから反映する」：書き換え済みのシートを確認し直す（変更点の一覧は出せない）
+function resumePendingEdit() {
+  setPendingBusy(true);
+  setPendingMsg('読み込み中…');
+  google.script.run
+    .withSuccessHandler(function (res) {
+      setPendingBusy(false);
+      if (!res || !res.ok) {
+        setPendingMsg(((res && res.errors) || ['読み込みに失敗しました']).join(' ／ '));
+        refreshPendingEdit();
+        return;
+      }
+      setPendingMsg('');
+      if (state.editMode) leaveEditMode();
+      state.inputMode = false;
+      state.mode = 'edit';
+      state.editFlow = true;
+      state.editResume = true;
+      state.editKind = res.kind || '';
+      renderEditConfirm(res);
+      show('s2');
+    })
+    .withFailureHandler(function (e) {
+      setPendingBusy(false);
+      setPendingMsg('読み込みに失敗しました：' + e.message);
+    })
+    .mrResumePendingEdit(authArg());
+}
+
+// --- S-E 検索・一覧 ---
+var searchSeq = 0;   // 古い検索の応答で新しい結果を上書きしないための連番
+
+function goEditSearch() {
+  // 未反映の受注が残っている間は次の書き換えを始めさせない（サーバ側でも拒否する）
+  if (state.pendingEdit) {
+    show('s0');
+    setPendingMsg('先に、この受注を「元に戻す」か「続きから反映する」で片付けてください。');
+    var box = document.getElementById('pendingBanner');
+    if (box.scrollIntoView) box.scrollIntoView();
+    return;
+  }
+  if (state.editMode) leaveEditMode();
+  state.inputMode = false;
+  state.editFlow = false;
+  state.editResume = false;
+  show('se');
+  runOrderSearch();
+}
+
+function goHomeFromEdit() {
+  if (state.editMode) leaveEditMode();
+  show('s0');
+}
+
+function setSearchBusy(busy) {
+  document.getElementById('seSearchBtn').disabled = busy;
+  document.getElementById('seByNameBtn').disabled = busy;
+}
+
+function beginSearch(text) {
+  searchSeq++;
+  setSearchBusy(true);
+  var msg = document.getElementById('seMsg');
+  msg.innerHTML = '';
+  msg.appendChild(mkAlert('info', text));
+  document.getElementById('seList').innerHTML = '';
+  return searchSeq;
+}
+
+function searchFailed(seq, text) {
+  if (seq !== searchSeq) return;
+  setSearchBusy(false);
+  var msg = document.getElementById('seMsg');
+  msg.innerHTML = '';
+  msg.appendChild(mkAlert('err', text));
+}
+
+// 受注カレンダーから探す（主）。検索語が空なら今日以降の全件
+function runOrderSearch() {
+  var query = document.getElementById('seQuery').value;
+  var seq = beginSearch('読み込み中…');
+  google.script.run
+    .withSuccessHandler(function (res) {
+      if (seq !== searchSeq) return;
+      renderOrderSearch(res || { orders: [], truncated: false }, false);
+    })
+    .withFailureHandler(function (e) { searchFailed(seq, '読み込みに失敗しました：' + e.message); })
+    .mrSearchOrders(authArg(), query);
+}
+
+// 受注フォルダをファイル名で探す（副）。カレンダーの予定が消された受注の救済用
+function runOrderSearchByName() {
+  var query = document.getElementById('seQuery').value;
+  var seq = beginSearch('ファイル名で探しています…');
+  google.script.run
+    .withSuccessHandler(function (res) {
+      if (seq !== searchSeq) return;
+      if (!res || !res.ok) {
+        searchFailed(seq, ((res && res.errors) || ['検索に失敗しました']).join(' ／ '));
+        return;
+      }
+      renderOrderSearch(res, true);
+    })
+    .withFailureHandler(function (e) { searchFailed(seq, '検索に失敗しました：' + e.message); })
+    .mrSearchOrdersByName(authArg(), query);
+}
+
+function renderOrderSearch(res, byName) {
+  setSearchBusy(false);
+  var orders = res.orders || [];
+  var msg = document.getElementById('seMsg');
+  msg.innerHTML = '';
+  if (orders.length === 0) {
+    msg.appendChild(mkAlert('warn', byName
+      ? 'その名前のファイルは見つかりませんでした。'
+      : '今日以降の受注が見つかりませんでした。言葉を変えるか、「ファイル名で探す」を試してください。'));
+  } else {
+    msg.appendChild(mkAlert('info', byName
+      ? 'ファイル名で ' + orders.length + ' 件見つかりました。直す受注を選んでください。'
+      : '納品の早い順に ' + orders.length + ' 件を表示しています。直す受注を選んでください。'));
+  }
+  if (res.truncated) {
+    msg.appendChild(mkAlert('warn', '件数が多いため一部だけ表示しています。検索する言葉で絞り込んでください。'));
+  }
+
+  var list = document.getElementById('seList');
+  list.innerHTML = '';
+  orders.forEach(function (o) {
+    var card = mkEl('div', 'card orderRow');
+    var when = fmtJst(o.start);
+    card.appendChild(mkEl('div', 'when', when || 'ファイル名で見つかった受注'));
+    card.appendChild(mkEl('div', 'ttl', o.title));
+    if (o.calendarName) card.appendChild(mkEl('div', 'muted', o.calendarName));
+    card.onclick = function () { selectOrder(o.ssId, o.orderNo, o.title); };
+    list.appendChild(card);
+  });
+}
+
+function backToSearch() {
+  if (state.editMode) leaveEditMode();
+  state.editOrder = null;
+  show('se');
+}
+
+// --- S-V 選んだ受注を読む（読むだけ。シートには書かない）---
+function selectOrder(ssId, orderNo, title) {
+  if (state.editMode) leaveEditMode();
+  state.editSel = { ssId: ssId, orderNo: orderNo || '', title: title || '' };
+  state.editOrder = null;
+  show('sv');
+  var msg = document.getElementById('svMsg');
+  msg.innerHTML = '';
+  msg.appendChild(mkAlert('info', '読み込み中…'));
+  document.getElementById('svDetail').innerHTML = '';
+  document.getElementById('svChangeBtn').disabled = true;
+  document.getElementById('svCancelBtn').disabled = true;
+
+  var sel = state.editSel;
+  google.script.run
+    .withSuccessHandler(function (res) {
+      if (state.editSel !== sel) return;   // 応答を待つ間に別の受注を選び直した
+      renderOrderView(res);
+    })
+    .withFailureHandler(function (e) {
+      if (state.editSel !== sel) return;
+      msg.innerHTML = '';
+      msg.appendChild(mkAlert('err', '読み込みに失敗しました：' + e.message));
+    })
+    .mrLoadEdit(authArg(), ssId, orderNo || '');
+}
+
+function renderOrderView(res) {
+  var msg = document.getElementById('svMsg');
+  var box = document.getElementById('svDetail');
+  msg.innerHTML = '';
+  box.innerHTML = '';
+  if (!res || !res.ok) {
+    ((res && res.errors) || ['読み込みに失敗しました']).forEach(function (t) {
+      msg.appendChild(mkAlert('err', t));
+    });
+    return;
+  }
+  state.editOrder = res;
+  var v = res.values || {};
+  var c = res.computed || {};
+
+  var flagWrap = mkEl('div', 'center');
+  flagWrap.style.marginBottom = '12px';
+  flagWrap.appendChild(mkEl('span', 'flag ' + flagClass(res.orderType), res.orderType || '未選択'));
+  box.appendChild(flagWrap);
+  box.appendChild(mkRow('会社名', v.companyName));
+  box.appendChild(mkRow('納品日時', (v.deliveryDate || '') + '　' + (v.startTime || '') + ' 〜 ' + (v.endTime || '')));
+  box.appendChild(mkRow('合計食数', c.mealCount));
+  box.appendChild(mkRow('合計金額', c.totalAmount ? c.totalAmount + '円' : ''));
+  box.appendChild(mkRow('受注番号', v.orderNo));
+  box.appendChild(mkRow('屋号', v.shopName));
+  box.appendChild(mkRow('媒体', v.media));
+  if (res.sheetUrl) {
+    var linkRow = mkEl('div', 'row');
+    linkRow.appendChild(mkEl('span', 'k', 'シート'));
+    var linkV = mkEl('span', 'v');
+    linkV.appendChild(mkSheetLink(res.sheetUrl));
+    linkRow.appendChild(linkV);
+    box.appendChild(linkRow);
+  }
+
+  var cancelled = (res.orderType === 'キャンセル');
+  if (cancelled) {
+    msg.appendChild(mkAlert('warn', 'この受注はすでに「キャンセル」になっています。アプリからは変更・キャンセルできません。PCで確認してください。'));
+  }
+  document.getElementById('svChangeBtn').disabled = cancelled;
+  document.getElementById('svCancelBtn').disabled = cancelled;
+  document.getElementById('svCancelBtn').textContent = 'この受注をキャンセルする';
+}
+
+function editOrderNo() {
+  var o = state.editOrder || {};
+  return String((o.values && o.values.orderNo) || (state.editSel && state.editSel.orderNo) || '');
+}
+
+// --- S-D 編集フォーム（新規の saForm を変更モードで使い回す）---
+function setEditReadOnly(on) {
+  EDIT_READONLY_IDS.forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.disabled = on;
+  });
+}
+
+function setItemsDisabled(disabled) {
+  var els = document.getElementById('inItems').querySelectorAll('.itemCode, .itemQty, .removeItem');
+  for (var i = 0; i < els.length; i++) els[i].disabled = disabled;
+}
+
+/**
+ * 変更モードへ入る。読み込んだ受注の値をフォームへ流し込む。
+ * 新規の入力途中の内容は、先に下書きへ保存してから上書きする（変更モード中は下書きを保存しないため）。
+ */
+function enterEditMode(order) {
+  if (!state.editMode && draftTimer) saveDraftNow();
+  state.editMode = true;
+  state.inputMode = false;
+  state.editItemsEditable = (order.itemsEditable === true);
+
+  document.getElementById('saForm').reset();
+  document.getElementById('saErrors').innerHTML = '';
+  document.getElementById('draftBanner').hidden = true;
+
+  var v = order.values || {};
+  DRAFT_TEXT_FIELDS.forEach(function (pair) {
+    var el = document.getElementById(pair[0]);
+    if (!el) return;
+    var key = pair[1];
+    var value = v[key];
+    if (key === 'deliveryDate' || key === 'orderDate') value = toHtmlDate(value);
+    if (key === 'startTime' || key === 'endTime') value = toHtmlTime(value);
+    setFieldValue(el, value);
+  });
+  setEditReadOnly(true);
+
+  var wrap = document.getElementById('inItems');
+  wrap.innerHTML = '';
+  (order.items || []).forEach(function (it) {
+    addItemRow();   // 13品目以降は行を作れない（そのときは itemsEditable が false で、商品は送らない）
+    var rows = wrap.querySelectorAll('.itemRow');
+    var row = rows[rows.length - 1];
+    if (!row || row.getAttribute('data-filled')) return;
+    row.setAttribute('data-filled', '1');
+    setFieldValue(row.querySelector('.itemCode'), it.code);
+    row.querySelector('.itemQty').value = it.quantity ? it.quantity : '';
+  });
+
+  var note = document.getElementById('editItemsNote');
+  note.innerHTML = '';
+  if (state.editItemsEditable) {
+    note.hidden = true;
+  } else {
+    note.appendChild(mkEl('div', '', '商品はシートで直してください（13品以上、またはプルダウンに無い商品が入っています）。'));
+    if (order.sheetUrl) note.appendChild(mkSheetLink(order.sheetUrl));
+    note.hidden = false;
+    setItemsDisabled(true);
+  }
+  updateAddItemBtn();
+
+  var banner = document.getElementById('editBanner');
+  banner.textContent = '登録済みの受注を直しています（受注番号 ' + (v.orderNo || '不明')
+    + '）。灰色の欄は変更できません。送料・調整金額などフォームに無い項目はシートの値のまま残ります。';
+  banner.hidden = false;
+  var btn = document.getElementById('saSubmitBtn');
+  btn.disabled = false;
+  btn.textContent = EDIT_SUBMIT_LABEL;
+
+  // 触っていない欄を見分けるための控え。表示用に変換した値（日付の表記など）を
+  // そのまま送ると、変えていないのに変更点になりうるため、触っていない欄は元の値を送る。
+  state.editBaseline = collectInputForm();
+}
+
+/** 変更モードを抜ける。新規の入力フォームをまっさらに戻し、2つの流れで値が混ざらないようにする */
+function leaveEditMode() {
+  if (!state.editMode) return;
+  state.editMode = false;
+  state.editBaseline = null;
+  state.editItemsEditable = true;
+  setEditReadOnly(false);
+  var extras = document.getElementById('saForm').querySelectorAll('option[data-edit-extra]');
+  for (var i = 0; i < extras.length; i++) extras[i].parentNode.removeChild(extras[i]);
+  document.getElementById('editBanner').hidden = true;
+  var note = document.getElementById('editItemsNote');
+  note.hidden = true;
+  note.innerHTML = '';
+  var btn = document.getElementById('saSubmitBtn');
+  btn.disabled = false;
+  btn.textContent = NEW_SUBMIT_LABEL;
+  clearInputForm();   // 商品行も作り直される（無効化した行は残らない）
+}
+
+function startChange() {
+  if (!state.editOrder || !state.editOrder.ok) return;
+  enterEditMode(state.editOrder);
+  show('sa');
+}
+
+// フォームの送信先を、新規と変更で振り分ける
+function submitInputForm() {
+  if (state.editMode) { goConfirmEdit(); } else { goConfirmInput(); }
+}
+
+/** サーバへ送る「直したあとの値」。触っていない欄は開いたときの値（シートの表示値）のまま送る */
+function buildEditedForm() {
+  var form = collectInputForm();
+  var base = state.editBaseline || {};
+  var orig = state.editOrder || {};
+  var origValues = orig.values || {};
+  var edited = {};
+  for (var key in form) {
+    if (!Object.prototype.hasOwnProperty.call(form, key) || key === 'items') continue;
+    var untouched = (form[key] === base[key]) && Object.prototype.hasOwnProperty.call(origValues, key);
+    edited[key] = untouched ? origValues[key] : form[key];
+  }
+  var itemsUntouched = JSON.stringify(form.items) === JSON.stringify(base.items || []);
+  edited.items = itemsUntouched ? (orig.items || []) : form.items;
+  return edited;
+}
+
+function editPrepareFailed(errors) {
+  renderInputErrors(errors);
+  // 未反映の受注が残っていて断られた場合に備え、ホームの案内を取り直す
+  refreshPendingEdit();
+}
+
+// 「変更内容を確認へ」。ここで初めてシートへ書く（mrPrepareEdit）
+function goConfirmEdit() {
+  var btn = document.getElementById('saSubmitBtn');
+  if (btn.disabled) return;   // 連打で2回書き込まない
+  if (!state.editOrder || !state.editSel) { renderInputErrors(['受注を選び直してください']); return; }
+  document.getElementById('saErrors').innerHTML = '';
+  btn.disabled = true;
+  btn.textContent = 'シートへ書き込んで確認中…';
+  function restore() { btn.disabled = false; btn.textContent = EDIT_SUBMIT_LABEL; }
+
+  var payload = {
+    ssId: state.editSel.ssId,
+    orderNo: editOrderNo(),
+    kind: 'change',
+    original: state.editOrder,
+    edited: buildEditedForm(),
+    itemsEditable: state.editItemsEditable
+  };
+  google.script.run
+    .withSuccessHandler(function (res) {
+      restore();
+      if (!res || !res.ok) { editPrepareFailed((res && res.errors) || ['確認に失敗しました']); return; }
+      openEditConfirm(res, 'change');
+    })
+    .withFailureHandler(function (e) {
+      restore();
+      editPrepareFailed([e.message]);
+    })
+    .mrPrepareEdit(authArg(), payload);
+}
+
+// 「この受注をキャンセルする」。フォームは出さず、フラグをキャンセルにして確認へ進む
+function startCancel() {
+  var btn = document.getElementById('svCancelBtn');
+  if (btn.disabled) return;
+  if (!state.editOrder || !state.editSel) return;
+  var changeBtn = document.getElementById('svChangeBtn');
+  var backBtn = document.getElementById('svBackBtn');
+  btn.disabled = true;
+  changeBtn.disabled = true;
+  backBtn.disabled = true;
+  btn.textContent = '確認中…';
+  function restore() {
+    btn.disabled = false; changeBtn.disabled = false; backBtn.disabled = false;
+    btn.textContent = 'この受注をキャンセルする';
+  }
+  function failed(errors) {
+    restore();
+    var msg = document.getElementById('svMsg');
+    msg.innerHTML = '';
+    errors.forEach(function (t) { msg.appendChild(mkAlert('err', t)); });
+    window.scrollTo(0, 0);
+    refreshPendingEdit();
+  }
+
+  google.script.run
+    .withSuccessHandler(function (res) {
+      if (!res || !res.ok) { failed((res && res.errors) || ['確認に失敗しました']); return; }
+      restore();
+      document.getElementById('svMsg').innerHTML = '';
+      openEditConfirm(res, 'cancel');
+    })
+    .withFailureHandler(function (e) { failed([e.message]); })
+    .mrPrepareEdit(authArg(), { ssId: state.editSel.ssId, orderNo: editOrderNo(), kind: 'cancel' });
+}
+
+// mrPrepareEdit が成功した＝シートは書き換わっている。実行は既存の mrApply（反映経路）を使う
+function openEditConfirm(res, kind) {
+  state.inputMode = false;   // 実行で mrRunInput ではなく mrApply を呼ばせる
+  state.mode = 'edit';
+  state.editFlow = true;
+  state.editResume = false;
+  state.editKind = kind;
+  state.pendingEdit = {
+    ssId: state.editSel.ssId, orderNo: editOrderNo(), kind: kind, sheetUrl: res.sheetUrl || ''
+  };
+  renderEditConfirm(res);
+  show('s2');
+}
+
+/**
+ * 変更・キャンセルの確認画面（既存の #s2 を使う）。
+ * 明細・ブロッカー・警告・実行ボタンの制御は反映経路の renderDetail に任せ、
+ * その上に「変更点」とキャンセルの強調、シートへのリンクを足す。
+ */
+function renderEditConfirm(res) {
+  renderDetail(res);   // state.token と state.detail（確認の窓が読む）もここで入る
+  var back = document.getElementById('s2BackBtn');
+  back.disabled = false;
+  back.textContent = '戻る';
+
+  var alerts = document.getElementById('s2alerts');
+  var kind = res.kind || state.editKind;
+  if (kind === 'cancel') {
+    alerts.insertBefore(mkAlert('err', '⚠️ この受注をキャンセルします。実行すると受注一覧表とカレンダーがキャンセル扱いになります。'),
+                        alerts.firstChild);
+  }
+  if (state.editResume) {
+    alerts.insertBefore(mkAlert('info', '前回シートを書き換えたところから再開しています。下の内容がいまのシートの内容です（変更点の一覧は出せません）。'),
+                        alerts.firstChild);
+  }
+
+  var diffBox = document.getElementById('s2diff');
+  diffBox.innerHTML = '';
+  var diff = res.diff || [];
+  if (kind !== 'cancel' && diff.length > 0) {
+    var title = mkEl('div', 'k', '変更点');
+    title.style.marginBottom = '8px';
+    diffBox.appendChild(title);
+    diff.forEach(function (d) {
+      var row = mkEl('div', 'diffRow');
+      row.appendChild(mkEl('div', 'k', d.label || d.key));
+      var line = mkEl('div', '');
+      line.appendChild(mkEl('span', '', (d.before === '' || d.before == null) ? '（空）' : d.before));
+      line.appendChild(mkEl('span', 'muted', ' → '));
+      line.appendChild(mkEl('span', 'after', (d.after === '' || d.after == null) ? '（空）' : d.after));
+      row.appendChild(line);
+      diffBox.appendChild(row);
+    });
+    diffBox.hidden = false;
+  } else {
+    diffBox.hidden = true;
+  }
+
+  var detail = document.getElementById('s2detail');
+  var computed = res.computed || {};
+  if (computed.eventTitle) detail.appendChild(mkRow('カレンダータイトル', computed.eventTitle));
+  if (res.sheetUrl) {
+    var linkRow = mkEl('div', 'row');
+    linkRow.appendChild(mkEl('span', 'k', 'シート'));
+    var linkV = mkEl('span', 'v');
+    linkV.appendChild(mkSheetLink(res.sheetUrl));
+    linkRow.appendChild(linkV);
+    detail.appendChild(linkRow);
+  }
+}
+
+/**
+ * 変更・キャンセルの確認画面の「戻る」。
+ * 書き換えたシートを元へ戻せたことを確かめてから画面を移す。戻せなければ確認画面に留まる
+ * （黙って離れると、シートが「変更後の値・フラグ変更」のまま気づかれずに残る）。
+ */
+function revertAndLeaveConfirm() {
+  var back = document.getElementById('s2BackBtn');
+  if (back.disabled) return;
+  var run = document.getElementById('runBtn');
+  var runWasDisabled = run.disabled;
+  back.disabled = true;
+  run.disabled = true;
+  back.textContent = '元に戻しています…';
+
+  function stay(message) {
+    back.disabled = false;
+    back.textContent = '戻る';
+    run.disabled = runWasDisabled;
+    var alerts = document.getElementById('s2alerts');
+    var box = mkAlert('err', '元に戻せませんでした：' + message + '　シートを開いて内容を確認してください。 ');
+    var url = (state.pendingEdit && state.pendingEdit.sheetUrl) || '';
+    if (url) box.appendChild(mkSheetLink(url));
+    alerts.insertBefore(box, alerts.firstChild);
+    window.scrollTo(0, 0);
+  }
+
+  google.script.run
+    .withSuccessHandler(function (r) {
+      if (!r || !r.reverted) { stay((r && r.message) || '原因不明'); return; }
+      back.disabled = false;
+      back.textContent = '戻る';
+      state.token = null;
+      state.editFlow = false;
+      renderPendingEdit(null);
+      // 変更は編集フォームへ（直した内容は残っている）、キャンセルは受注の表示へ戻る
+      show(state.editKind === 'cancel' ? 'sv' : 'sa');
+    })
+    .withFailureHandler(function (e) { stay(e.message); })
+    .mrRevertPendingEdit(authArg());
+}
+
+// すべての定義が済んでから起動する
+boot();
+</script>
+</body>
+</html>
