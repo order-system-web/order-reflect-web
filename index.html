@@ -23,8 +23,10 @@
   .btn.danger { background:var(--red); }
   .btn:disabled { background:#e0e0e0; color:#9aa0a6; }
   .row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #f1f3f4; font-size:15px; }
-  .row .k { color:var(--gray); }
-  .row .v { font-weight:600; text-align:right; margin-left:12px; }
+  .row .k { color:var(--gray); flex:0 1 auto; min-width:0; }
+  /* ファイル名や会社名は区切りの無い長い文字列になる。min-width:0 と折り返しが無いと
+     flex の子が縮まず、行が画面幅を超えて横スクロールになる（スマホで発生） */
+  .row .v { font-weight:600; text-align:right; margin-left:12px; min-width:0; word-break:break-all; }
   .flag { display:inline-block; padding:6px 14px; border-radius:999px; color:#fff; font-weight:700; font-size:15px; background:var(--gray); }
   .flag.new { background:var(--blue); } .flag.chg { background:var(--orange); } .flag.cxl { background:var(--red); }
   .alert { padding:12px; border-radius:8px; font-size:14px; margin-bottom:12px; line-height:1.6; }
