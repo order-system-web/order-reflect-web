@@ -429,7 +429,7 @@ function newDeviceId() {
 // （tests/mobileInputGuards.test.js が画面の呼び出し箇所と突き合わせて落とす）。
 // ---------------------------------------------------------------
 var MR_RPC_NAMES = [
-  'mrUnlock',
+  'mrUnlock', 'mrBootstrap',
   'mrGetEnv', 'mrGetLastResult', 'mrGetFailedIntake', 'mrClearFailedIntake',
   'mrGetInputChoices', 'mrListTargets', 'mrGetDetail', 'mrApply',
   'mrPrepareInput', 'mrRunInput', 'mrDiscardPreparedInput',
@@ -487,13 +487,39 @@ function apiUrl() {
 }
 
 /**
+ * やり直してよい呼び出しの一覧（読むだけのもの）。
+ *
+ * 🔴 ここに「書き込む操作」を足さないこと。返事が届かなかっただけで、サーバ側は
+ * 処理を終えていることがある。やり直すと受注が二重に登録される。
+ * そのため mrApply / mrRunInput / mrPrepareInput / mrPrepareEdit /
+ * mrRevertPendingEdit / mrSaveDraft / mrClearDraft / mrDiscardPreparedInput /
+ * mrClearFailedIntake / mrDismissPendingEdit / mrResumePendingEdit は入れていない。
+ */
+var MR_RETRY_SAFE_NAMES = [
+  'mrBootstrap',
+  'mrGetEnv', 'mrGetLastResult', 'mrGetFailedIntake', 'mrGetInputChoices',
+  'mrGetDraft', 'mrGetPendingEdit',
+  'mrSearchOrders', 'mrSearchOrdersByName', 'mrLoadEdit', 'mrGetDetail',
+  'mrListTargets', 'mrUnlock'
+];
+
+// やり直しは2回まで。待ち時間は順に使う（すぐ投げ直しても同じ結果になりやすい）
+var MR_RETRY_WAITS_MS = [400, 1200];
+
+// 本文がJSONでないとき（Googleが私たちのコードを呼ぶ前に返したHTMLのページ）の文言。
+// 解析エラーをそのまま出すと、現場では何のことか分からない
+var MR_UNSTABLE_MESSAGE = '通信が不安定です。もう一度お試しください';
+
+/**
  * 1回分のサーバ呼び出し。
  *
  * 🔴 Apps Script は CORS の事前確認（OPTIONS / preflight）に答えられない。
  * 別ドメインから呼ぶので「単純なリクエスト」にしなければ必ず失敗する。
  * Content-Type は text/plain;charset=utf-8 のまま、独自ヘッダを足さないこと。
+ *
+ * @param {number=} attempt 何回目か（0が初回）。retryApi がやり直すときだけ渡す
  */
-function callApi(name, args, onSuccess, onFailure) {
+function callApi(name, args, onSuccess, onFailure, attempt) {
   var url = apiUrl();
   if (!url) {
     deliverApi(onSuccess, onFailure,
@@ -525,22 +551,44 @@ function callApi(name, args, onSuccess, onFailure) {
   }).then(function (res) {
     return res.text();
   }).then(function (text) {
-    var data = null;
-    var err = null;
+    var parsed = null;
     try {
-      var parsed = JSON.parse(text);
-      if (!parsed || parsed.ok !== true) {
-        throw new Error((parsed && parsed.error) || '処理に失敗しました');
-      }
-      data = parsed.data;
+      parsed = JSON.parse(text);
     } catch (e) {
-      err = (e instanceof Error) ? e : new Error('サーバの応答を読めませんでした');
+      // 本文がJSONとして読めない＝HTMLのページが返っている。私たちのコードは
+      // 動いていない（実行ログにも残らない）ので、読むだけの呼び出しならやり直す。
+      if (retryApi(name, args, onSuccess, onFailure, attempt)) return;
+      deliverApi(onSuccess, onFailure, new Error(MR_UNSTABLE_MESSAGE), null);
+      return;
     }
-    deliverApi(onSuccess, onFailure, err, data);
+    // ここまで来たら私たちのコードが答えている。
+    // {ok:false} は本当の返事なのでやり直さない（通信の不調ではない）。
+    if (!parsed || parsed.ok !== true) {
+      deliverApi(onSuccess, onFailure,
+        new Error((parsed && parsed.error) || '処理に失敗しました'), null);
+      return;
+    }
+    deliverApi(onSuccess, onFailure, null, parsed.data);
   }, function (e) {
+    // 通信そのものが失敗した（電波が切れた・応答が返らない）。届いていない可能性が高い
+    if (retryApi(name, args, onSuccess, onFailure, attempt)) return;
     deliverApi(onSuccess, onFailure,
       new Error('通信に失敗しました：' + ((e && e.message) || e)), null);
   });
+}
+
+/**
+ * やり直せるなら予約して true を返す。だめなら false（呼び出し側が失敗として返す）。
+ * やり直すのは MR_RETRY_SAFE_NAMES に載っている読むだけの呼び出しだけ。
+ */
+function retryApi(name, args, onSuccess, onFailure, attempt) {
+  var done = attempt || 0;
+  if (done >= MR_RETRY_WAITS_MS.length) return false;
+  if (MR_RETRY_SAFE_NAMES.indexOf(name) === -1) return false;
+  setTimeout(function () {
+    callApi(name, args, onSuccess, onFailure, done + 1);
+  }, MR_RETRY_WAITS_MS[done]);
+  return true;
 }
 
 /**
@@ -692,29 +740,70 @@ function boot() {
 /** 入口を通ったあとの読み込み。ここより前にサーバを呼ばない */
 function startApp() {
   show('s0');
-  loadEnv();
-  loadLastResult();
-  loadFailedIntake();
-  loadInputChoices();
-  loadDraft();
-  refreshPendingEdit();
+  loadBootstrap();
 }
 
 // --- 起動時の読み込み ---
+//
+// 🔴 起動時のサーバ呼び出しは mrBootstrap の1回だけにすること。
+// 以前はここから6回（mrGetEnv / mrGetLastResult / mrGetFailedIntake /
+// mrGetInputChoices / mrGetDraft / mrGetPendingEdit）を同時に投げていた。
+// 匿名公開のウェブアプリは同時の呼び出しに弱く、実機ではその一部が JSON ではなく
+// HTMLのページで返ってきて、画面が「設定の読み込みに失敗しました」で止まっていた
+// （2026-09-22。Apps Script の実行一覧に失敗が1件も無い＝私たちのコードまで届いていない）。
+//
+// 個別の読み込み（loadEnv・loadLastResult・loadFailedIntake・loadInputChoices・
+// loadDraft）は、部分ごとに読み直すための入口として残してある。**起動時には呼ばない。**
+function loadBootstrap() {
+  google.script.run
+    .withSuccessHandler(applyBootstrap)
+    .withFailureHandler(function (e) {
+      if (handleAuthError(e)) return;
+      setEnvError(e.message);
+    })
+    .mrBootstrap(authArg());
+}
+
+/**
+ * 1回の応答で届いた各部分を、個別の読み込みと同じ表示処理へ渡す。
+ * 表示の仕方はここで別に持たない（2通りに分かれると必ず食い違う）。
+ *
+ * 部分が null のときは、その個別の呼び出しが失敗したときとまったく同じ扱いにする
+ * （サーバ側 mrBootstrapCore_ が、取れなかった部分に null を入れてくる）。
+ */
+function applyBootstrap(res) {
+  var parts = res || {};
+  if (parts.env) renderEnv(parts.env);
+  else setEnvError(MR_UNSTABLE_MESSAGE);                 // loadEnv の失敗と同じ場所に出す
+  applyLastResult(parts.lastResult);                     // null なら「前回の結果」を出さない
+  renderFailedIntake(parts.failedIntake);                // null なら案内を出さない
+  if (parts.choices) applyInputChoices(parts.choices);   // null なら自由入力のまま使う
+  applyDraft(parts.draft);                               // null なら下書きを戻さない
+  renderPendingEdit(parts.pendingEdit);                  // null なら案内を出さない
+}
+
+/** 反映先が読めなかったときの表示。出す場所は成功時（renderEnv）と同じ欄 */
+function setEnvError(message) {
+  document.getElementById('ver').textContent = '設定の読み込みに失敗しました：' + message;
+}
+
 function loadEnv() {
   google.script.run.withSuccessHandler(renderEnv).withFailureHandler(function (e) {
     if (handleAuthError(e)) return;
-    document.getElementById('ver').textContent = '設定の読み込みに失敗しました：' + e.message;
+    setEnvError(e.message);
   }).mrGetEnv(authArg());
 }
 
+/** 前回の実行結果があれば、ホームに「前回の結果」を出せるようにする */
+function applyLastResult(last) {
+  if (!last) return;
+  state.result = last;
+  document.getElementById('lastBtn').style.display = 'block';
+}
+
 function loadLastResult() {
-  google.script.run.withSuccessHandler(function (last) {
-    if (last) {
-      state.result = last;
-      document.getElementById('lastBtn').style.display = 'block';
-    }
-  }).withFailureHandler(function (e) { handleAuthError(e); }).mrGetLastResult(authArg());
+  google.script.run.withSuccessHandler(applyLastResult)
+    .withFailureHandler(function (e) { handleAuthError(e); }).mrGetLastResult(authArg());
 }
 
 /**
@@ -749,16 +838,19 @@ function renderFailedIntake(failed) {
   box.appendChild(clearBtn);
   box.style.display = 'block';
 }
+// 前回失敗した受注の案内だけを取り直す（起動時は mrBootstrap がまとめて取ってくる）。
 function loadFailedIntake() {
   google.script.run.withSuccessHandler(renderFailedIntake)
     .withFailureHandler(function (e) { handleAuthError(e); /* ほかの読み込み失敗は無視する */ })
     .mrGetFailedIntake(authArg());
 }
 
-// 入力フォームの選択肢も起動時に読み込む（Fix round 1 Important#2）。
+// 入力フォームの選択肢は起動時に読み込む（Fix round 1 Important#2）。いまは
+// mrBootstrap の choices として届き、applyInputChoices へ渡る（起動ブロック参照）。
 // S-Aを開いてから読みに行くと、往復の間に入力を始めた欄がプルダウンへの
 // 差し替えで壊れる（フォーカスが外れてiOSのキーボードが閉じる）ことがある。
 // 起動時に済ませておけば、S-Aを開く時点で選択肢は届いていることが多い。
+// この関数は選択肢だけを取り直すときに使う。
 function loadInputChoices() {
   google.script.run.withSuccessHandler(applyInputChoices)
     .withFailureHandler(function (e) { handleAuthError(e); /* 自由入力のまま使えるので無視する */ })
@@ -1222,13 +1314,17 @@ function discardDraft() {
 document.getElementById('saForm').addEventListener('input', scheduleDraftSave);
 document.getElementById('saForm').addEventListener('change', scheduleDraftSave);
 
-// 起動時に下書きを取りに行く。入力画面を開いていて未入力なら、届いた時点で戻す。
+// 届いた下書きを覚える。入力画面を開いていて未入力なら、届いた時点で戻す。
+function applyDraft(d) {
+  if (!d || !d.form) return;
+  DRAFT_FORM = d.form;
+  if (state.inputMode && !formTouched) restoreDraft();
+}
+
+// 下書きだけを取り直す（起動時は mrBootstrap がまとめて取ってくる）。
 function loadDraft() {
-  google.script.run.withSuccessHandler(function (d) {
-    if (!d || !d.form) return;
-    DRAFT_FORM = d.form;
-    if (state.inputMode && !formTouched) restoreDraft();
-  }).withFailureHandler(function (e) { handleAuthError(e); /* 下書きが読めなくても入力はできる */ })
+  google.script.run.withSuccessHandler(applyDraft)
+    .withFailureHandler(function (e) { handleAuthError(e); /* 下書きが読めなくても入力はできる */ })
     .mrGetDraft(authArg());
 }
 
@@ -1743,7 +1839,9 @@ function refreshPendingEdit() {
     .withFailureHandler(function () { /* 読めなくても画面は止めない（サーバ側でも二重の書き換えは拒否する） */ })
     .mrGetPendingEdit(authArg());
 }
-// 起動時の確認は startApp() から呼ぶ（入口を通る前にサーバを呼ばないため）
+// 起動時の確認は mrBootstrap の pendingEdit で届き、applyBootstrap が
+// renderPendingEdit へ渡す（入口を通る前にサーバを呼ばないため）。
+// この関数は反映・元に戻したあとに取り直すために使う。
 
 // ホームの「元に戻す」
 function revertPendingFromHome() {
