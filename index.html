@@ -1194,6 +1194,19 @@ function reset() {
 // （Logic_MobileRun.js 側の mrValidateInputForm_ / mrBuildIntakeInput_ が担う）。
 // ---------------------------------------------------------------
 var INPUT_CHOICES = { shopNames: [], payments: [], itemCodes: [] };
+// 略語 → {name, price}。商品のプルダウンに商品名と金額を併記するために使う
+var ITEM_INFO = {};
+
+/**
+ * プルダウンに出す文字。商品の略語なら「略語（商品名 金額）」にする。
+ * 対応が無ければ略語だけ（原本に無い値・商品以外の項目）。
+ */
+function itemLabel(code) {
+  var info = ITEM_INFO[code];
+  if (!info) return code;
+  var extra = [info.name, info.price].filter(function (v) { return v; }).join(' ');
+  return extra ? code + '（' + extra + '）' : code;
+}
 // 追加項目の初期値（原本に入っている値）。媒体は毎回選ばせるので含まれない。
 var INPUT_DEFAULTS = {};
 var DEFAULT_FIELDS = [
@@ -1371,8 +1384,8 @@ function buildChoiceField(cls, choices, savedValue) {
     el.appendChild(blank);
     choices.forEach(function (c) {
       var opt = document.createElement('option');
-      opt.value = c;
-      opt.textContent = c;
+      opt.value = c;                    // シートへ書くのは略語のまま
+      opt.textContent = itemLabel(c);   // 商品のときだけ商品名と金額を足す
       el.appendChild(opt);
     });
   } else {
@@ -1421,6 +1434,7 @@ function replaceChoiceField(oldEl, choices) {
  */
 function applyInputChoices(choices) {
   INPUT_CHOICES = choices || { shopNames: [], payments: [], itemCodes: [] };
+  ITEM_INFO = (choices && choices.itemInfo) || {};
   replaceChoiceField(document.getElementById('inShopName'), INPUT_CHOICES.shopNames);
   replaceChoiceField(document.getElementById('inPayment'), INPUT_CHOICES.payments);
   replaceChoiceField(document.getElementById('inMedia'), INPUT_CHOICES.medias);
@@ -1906,7 +1920,20 @@ function goEditSearch() {
   state.editFlow = false;
   state.editResume = false;
   show('se');
-  runOrderSearch();
+  // 画面を開いただけでは読み込まない（2026-09-22 よしさん決定）。
+  // カレンダーを何本も走査するため、開くたびに待たされていた。
+  resetSearchScreen();
+}
+
+/** 検索前の状態に戻す。前の検索結果を残さない */
+function resetSearchScreen() {
+  SEARCH_SHOWN = 0;
+  SEARCH_ORDERS = [];
+  document.getElementById('seList').innerHTML = '';
+  var msg = document.getElementById('seMsg');
+  msg.innerHTML = '';
+  msg.appendChild(mkAlert('info',
+    '会社名・受注番号・日付で検索してください。空のまま「検索」を押すと、納品の早い順に表示します。'));
 }
 
 function goHomeFromEdit() {
@@ -1967,9 +1994,16 @@ function runOrderSearchByName() {
     .mrSearchOrdersByName(authArg(), query);
 }
 
+// 一度に出す件数。多いと画面が重くなるので、続きは「もっと見る」で出す
+var SEARCH_PAGE_SIZE = 10;
+var SEARCH_ORDERS = [];
+var SEARCH_SHOWN = 0;
+
 function renderOrderSearch(res, byName) {
   setSearchBusy(false);
   var orders = res.orders || [];
+  SEARCH_ORDERS = orders;
+  SEARCH_SHOWN = 0;
   var msg = document.getElementById('seMsg');
   msg.innerHTML = '';
   if (orders.length === 0) {
@@ -1979,23 +2013,46 @@ function renderOrderSearch(res, byName) {
   } else {
     msg.appendChild(mkAlert('info', byName
       ? 'ファイル名で ' + orders.length + ' 件見つかりました。直す受注を選んでください。'
-      : '納品の早い順に ' + orders.length + ' 件を表示しています。直す受注を選んでください。'));
+      : '納品の早い順に ' + orders.length + ' 件見つかりました。直す受注を選んでください。'));
   }
   if (res.truncated) {
     msg.appendChild(mkAlert('warn', '件数が多いため一部だけ表示しています。検索する言葉で絞り込んでください。'));
   }
 
+  document.getElementById('seList').innerHTML = '';
+  showMoreOrders();
+}
+
+/** 続きを SEARCH_PAGE_SIZE 件ずつ出す */
+function showMoreOrders() {
   var list = document.getElementById('seList');
-  list.innerHTML = '';
-  orders.forEach(function (o) {
-    var card = mkEl('div', 'card orderRow');
-    var when = fmtJst(o.start);
-    card.appendChild(mkEl('div', 'when', when || 'ファイル名で見つかった受注'));
-    card.appendChild(mkEl('div', 'ttl', o.title));
-    if (o.calendarName) card.appendChild(mkEl('div', 'muted', o.calendarName));
-    card.onclick = function () { selectOrder(o.ssId, o.orderNo, o.title); };
-    list.appendChild(card);
-  });
+  var more = document.getElementById('seMoreBtn');
+  if (more) list.removeChild(more);
+
+  var end = Math.min(SEARCH_SHOWN + SEARCH_PAGE_SIZE, SEARCH_ORDERS.length);
+  for (var i = SEARCH_SHOWN; i < end; i++) {
+    list.appendChild(buildOrderRow(SEARCH_ORDERS[i]));
+  }
+  SEARCH_SHOWN = end;
+
+  var rest = SEARCH_ORDERS.length - SEARCH_SHOWN;
+  if (rest > 0) {
+    var btn = mkEl('button', 'btn sub', 'もっと見る（残り ' + rest + ' 件）');
+    btn.type = 'button';
+    btn.id = 'seMoreBtn';
+    btn.onclick = showMoreOrders;
+    list.appendChild(btn);
+  }
+}
+
+function buildOrderRow(o) {
+  var card = mkEl('div', 'card orderRow');
+  var when = fmtJst(o.start);
+  card.appendChild(mkEl('div', 'when', when || 'ファイル名で見つかった受注'));
+  card.appendChild(mkEl('div', 'ttl', o.title));
+  if (o.calendarName) card.appendChild(mkEl('div', 'muted', o.calendarName));
+  card.onclick = function () { selectOrder(o.ssId, o.orderNo, o.title); };
+  return card;
 }
 
 function backToSearch() {
