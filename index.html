@@ -117,6 +117,8 @@
 
   <!-- 本番以外へ向いているときだけ出る赤帯。起動直後から出す -->
   <div class="alert err" id="envBanner" style="display:none"></div>
+  <!-- LINE の中のブラウザで開いたときだけ出す（isLineInAppBrowser。2026-09-29） -->
+  <div class="alert warn" id="lineBanner" hidden>⚠️ LINE の中で開いています。ホーム画面に追加して使うときは、画面の右下（または右上）のメニューから「Safariで開く」（Android は「ブラウザで開く」）を押して開き直してください。</div>
 
   <!-- 入口：合言葉。端末の登録が無い／切れているときだけ出す。
        ここを通るまで、ほかの画面もサーバ呼び出しも一切動かさない。
@@ -509,6 +511,18 @@ function hasGoogleScriptRun() {
 var MR_API_STORAGE_KEY = 'mr_api';
 
 /**
+ * LINE の中のブラウザで開いているか。UA に「Line/バージョン」が入る
+ * （iPhone は末尾に「Line/14.12.0」、Android は「Line/14.12.0/IAB」）。
+ * 「Online」「Pipeline」などに反応しないよう、Line/ の直後に数字が続く形だけを見る。
+ */
+function isLineInAppBrowser(ua) {
+  return /(^|[^A-Za-z])Line\/\d/.test(String(ua == null ? '' : ua));
+}
+// LINE の中で開いたら、Safari（Android はブラウザ）で開き直すよう案内する。
+// そこは Safari と保存場所が別なので、ホーム画面に追加しても設定が引き継がれない
+if (isLineInAppBrowser(navigator.userAgent)) document.getElementById('lineBanner').hidden = false;
+
+/**
  * 接続先として受け付けるURLの形。
  *
  * 🔴 ここを緩めないこと。#api= は誰でも作れるリンクなので、
@@ -535,8 +549,13 @@ function apiUrl() {
     try { given = decodeURIComponent(m[1]); } catch (e) { given = ''; }
     if (MR_API_URL_PATTERN.test(given)) {
       try { localStorage.setItem(MR_API_STORAGE_KEY, given); } catch (e) { /* 保存できなくても今回は使える */ }
-      // アドレスから消す（他の人に見えるところへ残さない）
-      try { history.replaceState(null, '', location.pathname); } catch (e) { /* 古い端末では消せない */ }
+      // アドレスから消す（他の人に見えるところへ残さない）。
+      // ただし LINE の中のブラウザでは消さない。そこは Safari と保存場所が別で、
+      // 利用者は「Safariで開く」で開き直す。消すと接続先の無いアドレスが渡り、
+      // Safari では「接続先が設定されていません」になる（2026-09-29）
+      if (!isLineInAppBrowser(navigator.userAgent)) {
+        try { history.replaceState(null, '', location.pathname); } catch (e) { /* 古い端末では消せない */ }
+      }
       return given;
     }
   }
