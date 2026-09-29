@@ -69,6 +69,36 @@
   .diffRow .after { font-weight:700; color:var(--orange); }
   .itemRow .removeItem { flex:0 0 auto; width:44px; padding:10px 0; border:1px solid var(--line);
     border-radius:8px; background:#fff; color:var(--red); font-size:16px; font-weight:700; }
+  /* 商品の欄の上に重ねる透明なボタン。押すと検索つきの選択画面を開く（2026-09-29）。
+     select 自体は残す（下書き・変更モード・送信前の必須チェックがそのまま select の値で動く） */
+  .pickWrap { position:relative; flex:1 1 auto; min-width:0; }
+  .pickOverlay { position:absolute; left:0; top:0; right:0; bottom:0; width:100%; margin:0; padding:0;
+                 background:transparent; border:none; cursor:pointer; }
+  .pickOverlay[hidden] { display:none; }
+  /* 商品を選ぶ画面（全画面）。display を指定するので hidden 属性の扱いも明示する */
+  #itemPicker { position:fixed; left:0; top:0; right:0; bottom:0; z-index:20; background:#fff;
+                display:flex; flex-direction:column; }
+  #itemPicker[hidden] { display:none; }
+  #itemPicker .pkHead { display:flex; align-items:center; gap:8px; padding:12px 16px 8px; }
+  #itemPicker .pkHead strong { flex:1 1 auto; font-size:17px; }
+  #itemPicker .pkClose { flex:0 0 auto; width:auto; padding:8px 14px; border:1px solid var(--line);
+                         border-radius:8px; background:#fff; color:var(--blue); font-size:15px; font-weight:600; }
+  #itemPicker .pkSearch { padding:0 16px 8px; }
+  #itemPicker .pkCount { padding:0 16px 6px; font-size:13px; color:var(--gray); }
+  #itemPicker .pkList { flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch; border-top:1px solid var(--line); }
+  #itemPicker .pkItem { display:block; width:100%; text-align:left; background:#fff; border:none;
+                        border-bottom:1px solid #f1f3f4; padding:12px 16px; font-family:inherit; color:#202124; }
+  #itemPicker .pkItem.cur { background:#e8f0fe; }
+  #itemPicker .pkName { display:flex; justify-content:space-between; gap:12px; font-size:16px; font-weight:600; }
+  #itemPicker .pkPrice { flex:0 0 auto; }
+  #itemPicker .pkCode { font-size:13px; color:var(--gray); margin-top:2px; word-break:break-all; }
+  /* 納品時刻の手入力の欄（「その他の時刻を入力」を選んだときだけ出す） */
+  .timeOther { display:flex; gap:8px; margin-top:6px; }
+  .timeOther[hidden] { display:none; }
+  .timeOther input { margin:0; }
+  .timeOther button { flex:0 0 auto; width:auto; padding:10px 16px; border:none; border-radius:8px;
+                      background:var(--blue); color:#fff; font-size:15px; font-weight:600; }
+  .fieldErr { color:var(--red); font-size:13px; margin-top:4px; }
 
   /* --- 入口（合言葉）--- */
   /* ホームは入口（合言葉）を通ってから show('s0') で出す。
@@ -169,11 +199,25 @@
         <label for="inDeliveryDate">納品日</label>
         <input id="inDeliveryDate" type="date" required>
 
+        <!-- 納品時刻は 10:00〜23:00 の15分刻みのプルダウン（選択肢は initTimeSelect が作る）。
+             リストに無い時刻は「その他の時刻を入力」から打てる（2026-09-29 先方要望） -->
         <label for="inStartTime">納品開始時刻</label>
-        <input id="inStartTime" type="time" value="09:00" required>
+        <select id="inStartTime" required></select>
+        <div class="timeOther" id="startTimeOtherBox" hidden>
+          <input id="startTimeOther" type="text" inputmode="decimal" autocomplete="off"
+                 placeholder="例：1010 → 10:10" aria-label="納品開始時刻を入力">
+          <button type="button" id="startTimeOtherBtn">決定</button>
+        </div>
+        <div class="fieldErr" id="startTimeOtherErr" hidden></div>
 
         <label for="inEndTime">納品終了時刻</label>
-        <input id="inEndTime" type="time" value="10:00" required>
+        <select id="inEndTime" required></select>
+        <div class="timeOther" id="endTimeOtherBox" hidden>
+          <input id="endTimeOther" type="text" inputmode="decimal" autocomplete="off"
+                 placeholder="例：1110 → 11:10" aria-label="納品終了時刻を入力">
+          <button type="button" id="endTimeOtherBtn">決定</button>
+        </div>
+        <div class="fieldErr" id="endTimeOtherErr" hidden></div>
 
         <label for="inOrderDate">注文日</label>
         <input id="inOrderDate" type="date">
@@ -264,6 +308,21 @@
       <button class="btn" id="rcGo" onclick="confirmRun()">実行する</button>
       <button class="btn sub" onclick="closeRunConfirm()">戻る</button>
     </div>
+  </div>
+
+  <!-- 商品を選ぶ画面（2026-09-29 先方要望：商品が多いので検索したい）。商品の欄に重ねたボタンから開く。
+       入力フォーム（saForm）の外に置く（検索欄の入力で下書きの保存が走らないように） -->
+  <div id="itemPicker" hidden role="dialog" aria-modal="true" aria-labelledby="pkTitle">
+    <div class="pkHead">
+      <strong id="pkTitle">商品を選ぶ</strong>
+      <button type="button" class="pkClose" onclick="closeItemPicker()">閉じる</button>
+    </div>
+    <div class="pkSearch">
+      <input id="pkQuery" type="search" autocomplete="off" enterkeyhint="search"
+             placeholder="商品名・略語で探す" aria-label="商品を探す">
+    </div>
+    <div class="pkCount" id="pkCount"></div>
+    <div class="pkList" id="pkList"></div>
   </div>
 
   <!-- S3 実行中 -->
@@ -857,8 +916,202 @@ function loadInputChoices() {
     .mrGetInputChoices(authArg());
 }
 
-// 納品時刻の初期値は 09:00〜10:00（value属性なので saForm.reset() でもここへ戻る）。
-// 空欄のままだと iOS の時刻ピッカーが「開いた時刻」から始まり、毎回大きく回すことになる。
+// ---------------------------------------------------------------
+// 納品時刻（2026-09-29 先方要望）
+// ---------------------------------------------------------------
+// 10:00〜23:00 を15分刻みでプルダウンに並べ、リストに無い時刻は「その他の時刻を入力」から
+// 打てるようにする（手で打ってもエラーにしない）。select の値は常に HH:mm か空。
+// 手入力の欄の値はそのまま送らず、「決定」で直してから select へ入れる。
+// 初期値は開始 10:00・終了 11:00（defaultSelected なので saForm.reset() でもここへ戻る）。
+var TIME_OTHER = '__other__';   // 「その他の時刻を入力」。値ではないので select に残さない
+
+/** プルダウンに並べる時刻（10:00〜23:00・15分刻み） */
+function timeSlots() {
+  var out = [];
+  for (var t = 10 * 60; t <= 23 * 60; t += 15) {
+    var h = Math.floor(t / 60);
+    var m = t % 60;
+    out.push((h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m);
+  }
+  return out;
+}
+
+/**
+ * 手で打った時刻を HH:mm に直す。読めない・範囲外なら空を返す。
+ * 受け付ける書き方：10:10 / 10.10 / 1010 / 930 / 10時10分 / 10時 / 10 / 全角 / 間の空白。
+ * サーバの mrNormalizeTime_（Logic_MobileRun.gs）と同じ規則（tests/mobileRun.test.js で突き合わせ）。
+ */
+function normalizeTimeInput(raw) {
+  var s = String(raw == null ? '' : raw);
+  if (s.normalize) s = s.normalize('NFKC');
+  s = s.replace(/\s+/g, '');
+  var x, h, m;
+  if ((x = /^(\d{1,2})[:.](\d{1,2})$/.exec(s))) { h = x[1]; m = x[2]; }
+  else if ((x = /^(\d{1,2})時(?:(\d{1,2})分?)?$/.exec(s))) { h = x[1]; m = x[2] || '0'; }
+  else if ((x = /^(\d{1,2})(\d{2})$/.exec(s))) { h = x[1]; m = x[2]; }
+  else if ((x = /^(\d{1,2})$/.exec(s))) { h = x[1]; m = '0'; }
+  else return '';
+  h = Number(h);
+  m = Number(m);
+  if (h > 23 || m > 59) return '';
+  return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+}
+
+function isTimeSelect(el) {
+  return !!(el && el.getAttribute && el.getAttribute('data-time-select') === '1');
+}
+
+/** 時刻のプルダウンに選択肢を作る。defaultValue は reset() で戻る初期値 */
+function initTimeSelect(sel, defaultValue) {
+  sel.setAttribute('data-time-select', '1');
+  sel.innerHTML = '';
+  // 空は「未入力」。変更モードでシートの時刻が空のとき、初期値で埋めて「変更点」にしないため
+  var blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = '選択してください';
+  sel.appendChild(blank);
+  timeSlots().forEach(function (t) {
+    var opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    if (t === defaultValue) opt.defaultSelected = true;
+    sel.appendChild(opt);
+  });
+  var other = document.createElement('option');
+  other.value = TIME_OTHER;
+  other.textContent = 'その他の時刻を入力…';
+  sel.appendChild(other);
+  sel.value = defaultValue;
+  sel.setAttribute('data-prev', sel.value);
+}
+
+/**
+ * 時刻をプルダウンへ入れる。リストに無い時刻（手入力・終了の自動設定・シートの値・下書き）は
+ * 「入力した時刻」として選択肢を足してから入れる。足さずに value へ入れると空になり、
+ * 「未入力」や、変更モードでは「空へ変更」として扱われてしまう。
+ */
+function setTimeValue(sel, value) {
+  var v = normalizeTimeInput(value);
+  if (!v) {
+    sel.value = '';
+    sel.setAttribute('data-prev', '');
+    return;
+  }
+  var found = false;
+  var other = null;
+  for (var i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === v) found = true;
+    if (sel.options[i].value === TIME_OTHER) other = sel.options[i];
+  }
+  if (!found) {
+    var opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v + '（入力した時刻）';
+    opt.setAttribute('data-custom-time', '1');
+    sel.insertBefore(opt, other);
+  }
+  sel.value = v;
+  sel.setAttribute('data-prev', v);
+}
+
+/**
+ * 「その他の時刻を入力」を選んだら手入力の欄を出し、「決定」（または Enter）で直して select へ入れる。
+ * 手入力の欄はフォームの中にあるので、Enter でフォームが送信されないよう止める。
+ *
+ * 戻り値の commitPending は、打ちかけのまま「確認へ」を押されたときに使う
+ * （commitPendingTimeInputs）。iPhone の数字キーボードには Enter が無く、
+ * 「決定」を押さずにキーボードを閉じて進むのが自然に起きるため。
+ */
+function bindTimeOther(sel, box, input, btn, err) {
+  function closeOther() {
+    box.hidden = true;
+    err.hidden = true;
+  }
+  sel.addEventListener('change', function (e) {
+    if (sel.value === TIME_OTHER) {
+      // 「その他」は値ではない。選ぶ前の値に戻してから手入力の欄を開く。
+      // 後ろの listener（開始→終了の自動設定・下書きの保存）には値が変わったと伝えない
+      setTimeValue(sel, sel.getAttribute('data-prev') || '');
+      e.stopImmediatePropagation();
+      box.hidden = false;
+      err.hidden = true;
+      input.value = '';
+      input.focus();
+      return;
+    }
+    sel.setAttribute('data-prev', sel.value);
+    closeOther();
+  });
+  /**
+   * 手入力の値を select へ入れる。読めなければ赤字を出して false。
+   * deferred は「決定」を押さずに「確認へ」で後から確定したとき（commitPending）だけ true
+   */
+  function decide(deferred) {
+    var v = normalizeTimeInput(input.value);
+    if (!v) {
+      err.textContent = '時刻として読めません（例：10:10）';
+      err.hidden = false;
+      return false;
+    }
+    var before = sel.value;
+    setTimeValue(sel, v);
+    closeOther();
+    // 開始→終了の自動設定と下書きの保存に、値が変わったことを伝える。
+    // 変わっていなければ伝えない（本物の select も同じ値を選び直しても change を出さない。
+    // 伝えると、手で直した終了が開始＋1時間で上書きされる）
+    if (sel.value === before) return true;
+    var ev = new Event('change', { bubbles: true });
+    // 「確認へ」で後から確定したとき（deferred）は、その前に利用者が終了を選んでいたかもしれない。
+    // 自動設定（autoEndFromStart）が判断できるよう、確定前の値を添える
+    if (deferred) {
+      ev.mrDeferred = true;
+      ev.mrPrevValue = before;
+    }
+    sel.dispatchEvent(ev);
+    return true;
+  }
+  btn.addEventListener('click', function () { decide(false); });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      decide(false);
+    }
+  });
+  return {
+    /** 打ちかけの時刻を「決定」と同じように入れる。読めなければ赤字のまま false（送信を止める） */
+    commitPending: function () {
+      if (box.hidden || String(input.value).trim() === '') return true;
+      if (decide(true)) return true;
+      input.focus();
+      return false;
+    }
+  };
+}
+
+/** 開いたままの手入力の欄を確定する。読めない値があれば false（送信しない） */
+function commitPendingTimeInputs() {
+  for (var i = 0; i < TIME_OTHER_FIELDS.length; i++) {
+    if (!TIME_OTHER_FIELDS[i].commitPending()) return false;
+  }
+  return true;
+}
+
+/** reset() のあとに呼ぶ。使わなくなった「入力した時刻」の選択肢と手入力の欄を片付ける */
+function resetTimeFields() {
+  ['inStartTime', 'inEndTime'].forEach(function (id) {
+    var sel = document.getElementById(id);
+    var extras = sel.querySelectorAll('option[data-custom-time]');
+    for (var i = 0; i < extras.length; i++) {
+      if (!extras[i].selected) sel.removeChild(extras[i]);
+    }
+    sel.setAttribute('data-prev', sel.value);
+  });
+  ['startTimeOther', 'endTimeOther'].forEach(function (id) {
+    document.getElementById(id + 'Box').hidden = true;
+    document.getElementById(id + 'Err').hidden = true;
+  });
+}
+
 // 開始時刻を変えたら終了時刻を開始＋1時間へ合わせる（終了はその後に手で直せる）。
 // 23時台は日をまたげないので 23:59 で止める。
 function endTimeFromStart(start) {
@@ -868,10 +1121,31 @@ function endTimeFromStart(start) {
   if (h > 23) return '23:59';
   return (h < 10 ? '0' + h : String(h)) + ':' + m[2];
 }
-document.getElementById('inStartTime').addEventListener('change', function () {
-  var end = endTimeFromStart(this.value);
-  if (end) document.getElementById('inEndTime').value = end;
+
+// bindTimeOther の listener を先に付ける（「その他」を選んだときに後ろの自動設定を止めるため）
+var TIME_OTHER_FIELDS = [];
+initTimeSelect(document.getElementById('inStartTime'), '10:00');
+initTimeSelect(document.getElementById('inEndTime'), '11:00');
+['startTime', 'endTime'].forEach(function (key) {
+  var cap = key.charAt(0).toUpperCase() + key.slice(1);
+  TIME_OTHER_FIELDS.push(bindTimeOther(document.getElementById('in' + cap),
+    document.getElementById(key + 'OtherBox'), document.getElementById(key + 'Other'),
+    document.getElementById(key + 'OtherBtn'), document.getElementById(key + 'OtherErr')));
 });
+/**
+ * 開始を変えたら終了を開始＋1時間へ合わせる（開始の change で呼ぶ）。
+ * ただし「確認へ」で打ちかけの開始を後から確定したとき（e.mrDeferred）は、利用者が先に
+ * 終了を選んでいたかもしれない。終了がまだ自動の値（前の開始＋1時間）のときだけ合わせ、
+ * 選び直した終了は上書きしない（2026-09-29 再々レビュー指摘）
+ */
+function autoEndFromStart(e) {
+  var endSel = document.getElementById('inEndTime');
+  if (e && e.mrDeferred && endSel.value !== endTimeFromStart(e.mrPrevValue)) return;
+  var end = endTimeFromStart(document.getElementById('inStartTime').value);
+  // 23:30 などリストに無い時刻にもなるので setTimeValue を通す
+  if (end) setTimeValue(endSel, end);
+}
+document.getElementById('inStartTime').addEventListener('change', autoEndFromStart);
 
 // --- S1 一覧 ---
 function goList(mode) {
@@ -1296,6 +1570,8 @@ function restoreDraft() {
   DRAFT_TEXT_FIELDS.forEach(function (pair) {
     var el = document.getElementById(pair[0]);
     if (!el || f[pair[1]] == null || f[pair[1]] === '') return;
+    // 納品時刻はリストに無い時刻（手入力）もあるので、選択肢を足してから入れる
+    if (isTimeSelect(el)) { setTimeValue(el, f[pair[1]]); return; }
     // 選択肢がまだ届いていない欄は自由入力のままなので値が入る。プルダウンに
     // 差し替わるとき buildChoiceField が値を引き継ぐ。
     el.value = f[pair[1]];
@@ -1326,6 +1602,13 @@ function discardDraft() {
 // 入力欄のどれかを触ったら保存を予約する（商品行は後から増えるので form でまとめて受ける）
 document.getElementById('saForm').addEventListener('input', scheduleDraftSave);
 document.getElementById('saForm').addEventListener('change', scheduleDraftSave);
+// 納品時刻の打ちかけは、ブラウザの必須チェックより前（ボタンを押した時点）に確定する。
+// submit の中で確定すると、時刻のプルダウンが空（変更モードでシートの時刻が空など）のとき
+// 必須チェックが先に止めて、確定されないまま「選択してください」と出てしまう。
+// Enter による送信でも送信ボタンの click が起きるので、ここ1か所で足りる
+document.getElementById('saSubmitBtn').addEventListener('click', function (e) {
+  if (!commitPendingTimeInputs()) e.preventDefault();
+});
 
 // 届いた下書きを覚える。入力画面を開いていて未入力なら、届いた時点で戻す。
 function applyDraft(d) {
@@ -1362,6 +1645,7 @@ function goHomeFromInput() {
  */
 function clearInputForm() {
   document.getElementById('saForm').reset();
+  resetTimeFields();
   document.getElementById('inItems').innerHTML = '';
   addItemRow();
   document.getElementById('saErrors').innerHTML = '';
@@ -1424,6 +1708,8 @@ function replaceChoiceField(oldEl, choices) {
   if (oldEl.getAttribute('aria-label')) newEl.setAttribute('aria-label', oldEl.getAttribute('aria-label'));
   if (oldEl.placeholder && newEl.tagName === 'INPUT') newEl.placeholder = oldEl.placeholder;
   oldEl.parentNode.replaceChild(newEl, oldEl);
+  // 商品の欄なら、重ねた検索ボタンを差し替え後の欄（プルダウン／手入力）に合わせる
+  syncPickOverlay(newEl.parentNode);
   return newEl;
 }
 
@@ -1462,6 +1748,21 @@ function addItemRow() {
   codeEl.setAttribute('aria-label', '商品略語');
   if (codeEl.tagName === 'INPUT') codeEl.placeholder = '商品略語';
 
+  // 商品の欄の上に透明なボタンを重ね、押したら検索つきの選択画面を開く（2026-09-29）。
+  // 欄（select）は差し替えられることがある（replaceChoiceField）ので、押した時点の欄を探す
+  var pickWrap = document.createElement('div');
+  pickWrap.className = 'pickWrap';
+  var pickBtn = document.createElement('button');
+  pickBtn.type = 'button';   // フォームの中にあるので、送信ボタンにしない
+  pickBtn.className = 'pickOverlay';
+  pickBtn.setAttribute('aria-label', '商品を検索して選ぶ');
+  pickBtn.onclick = function () {
+    var sel = pickWrap.querySelector('.itemCode');
+    if (sel && sel.tagName === 'SELECT' && !sel.disabled) openItemPicker(sel);
+  };
+  pickWrap.appendChild(codeEl);
+  pickWrap.appendChild(pickBtn);
+
   var qtyEl = document.createElement('input');
   qtyEl.type = 'number';
   qtyEl.className = 'itemQty';
@@ -1483,10 +1784,11 @@ function addItemRow() {
     scheduleDraftSave();   // 行の削除は input イベントが出ないので明示的に保存を予約する
   };
 
-  row.appendChild(codeEl);
+  row.appendChild(pickWrap);
   row.appendChild(qtyEl);
   row.appendChild(delBtn);
   wrap.appendChild(row);
+  syncPickOverlay(pickWrap);
   updateAddItemBtn();
 }
 
@@ -1495,6 +1797,157 @@ function updateAddItemBtn() {
   document.getElementById('addItemBtn').disabled =
     (count >= MAX_ITEMS) || (state.editMode && !state.editItemsEditable);
 }
+
+// ---------------------------------------------------------------
+// 商品を選ぶ画面（2026-09-29 先方要望：商品が多いので検索したい）
+// ---------------------------------------------------------------
+// 商品の欄（select）の上に重ねたボタンから開く。一覧は select の選択肢から作るので、
+// 選べる商品は今までのプルダウンと同じ。選んだら select の値（略語）を変えるだけで、
+// 下書き・変更モード・送信前の必須チェックは今までどおり select の値で動く。
+var PICKER_TARGET = null;   // いま選んでいる商品の欄（select）
+var PICKER_ITEMS = [];
+var PICKER_IGNORE_SCROLL = false;   // 一覧の作り直しで起きた scroll を無視している間 true
+
+/** 重ねた検索ボタンを欄に合わせる。手入力の欄（選択肢が無いとき）や無効な欄では出さない */
+function syncPickOverlay(wrap) {
+  if (!wrap || !wrap.classList || !wrap.classList.contains('pickWrap')) return;
+  var el = wrap.querySelector('.itemCode');
+  var btn = wrap.querySelector('.pickOverlay');
+  if (!btn) return;
+  btn.hidden = !el || el.tagName !== 'SELECT' || el.disabled;
+}
+
+/** 探すときの表記ゆれを揃える（全角／半角・ひらがな／カタカナ・大文字／小文字・空白） */
+function normalizeForSearch(s) {
+  var t = String(s == null ? '' : s);
+  if (t.normalize) t = t.normalize('NFKC');   // 全角英数・半角カナを揃える
+  return t.toLowerCase()
+    .replace(/[ぁ-ゖ]/g, function (ch) { return String.fromCharCode(ch.charCodeAt(0) + 0x60); })
+    .replace(/\s+/g, '');
+}
+
+/** 検索語（空白区切りで複数可）をすべて商品名か略語に含む商品だけを返す。空なら全件 */
+function filterPickerItems(items, query) {
+  var q = String(query == null ? '' : query);
+  if (q.normalize) q = q.normalize('NFKC');   // 全角の空白も区切りとして扱う
+  var words = q.split(/\s+/).map(normalizeForSearch).filter(function (w) { return w !== ''; });
+  if (words.length === 0) return items.slice();
+  return items.filter(function (it) {
+    var hay = normalizeForSearch((it.name || '') + ' ' + (it.code || ''));
+    return words.every(function (w) { return hay.indexOf(w) !== -1; });
+  });
+}
+
+/** select の選択肢から一覧を作る。商品表に無い略語（変更モードのシートの値など）も残す */
+function pickerItemsFromSelect(sel) {
+  var out = [];
+  for (var i = 0; i < sel.options.length; i++) {
+    var v = sel.options[i].value;
+    if (!v) continue;
+    var info = ITEM_INFO[v] || {};
+    out.push({ value: v, name: info.name || '', price: info.price || '', code: v });
+  }
+  return out;
+}
+
+/**
+ * 検索画面を、キーボードを除いた見えている範囲に合わせる。
+ * 合わせないと iOS ではキーボードの裏に一覧の下の方が隠れ、そこまでスクロールできない。
+ */
+function fitItemPicker() {
+  var vv = window.visualViewport;
+  var box = document.getElementById('itemPicker');
+  if (!vv || box.hidden) return;
+  box.style.top = vv.offsetTop + 'px';
+  box.style.height = vv.height + 'px';
+  box.style.bottom = 'auto';
+}
+
+function openItemPicker(sel) {
+  PICKER_TARGET = sel;
+  PICKER_ITEMS = pickerItemsFromSelect(sel);
+  var q = document.getElementById('pkQuery');
+  q.value = '';
+  renderItemPicker();
+  document.getElementById('itemPicker').hidden = false;
+  document.body.style.overflow = 'hidden';   // 後ろの入力画面がスクロールしないように
+  fitItemPicker();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', fitItemPicker);
+    window.visualViewport.addEventListener('scroll', fitItemPicker);
+  }
+  // 押した操作の中でフォーカスすると iOS でもキーボードが開く
+  try { q.focus(); } catch (e) { /* 開けなくても一覧から選べる */ }
+}
+
+function closeItemPicker() {
+  var box = document.getElementById('itemPicker');
+  box.hidden = true;
+  box.style.top = box.style.height = box.style.bottom = '';
+  if (window.visualViewport) {
+    window.visualViewport.removeEventListener('resize', fitItemPicker);
+    window.visualViewport.removeEventListener('scroll', fitItemPicker);
+  }
+  document.body.style.overflow = '';
+  PICKER_TARGET = null;
+}
+
+function renderItemPicker() {
+  var list = document.getElementById('pkList');
+  var hits = filterPickerItems(PICKER_ITEMS, document.getElementById('pkQuery').value);
+  var current = PICKER_TARGET ? PICKER_TARGET.value : '';
+  // 作り直しで一覧が先頭へ戻ると scroll が起きる（先頭へ戻す代入でも、短くなった一覧の
+  // 位置の切り詰めでも）。利用者のスクロールと取り違えて検索欄を閉じないよう、
+  // スクロール済みだったときは次の描画まで scroll を無視する
+  if (list.scrollTop !== 0) {
+    PICKER_IGNORE_SCROLL = true;
+    (window.requestAnimationFrame || function (f) { setTimeout(f, 50); })(function () {
+      PICKER_IGNORE_SCROLL = false;
+    });
+  }
+  list.innerHTML = '';
+  hits.forEach(function (it) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pkItem' + (it.value === current ? ' cur' : '');
+    var head = mkEl('div', 'pkName');
+    head.appendChild(mkEl('span', '', it.name || it.code));
+    if (it.price) head.appendChild(mkEl('span', 'pkPrice', it.price));
+    b.appendChild(head);
+    if (it.name) b.appendChild(mkEl('div', 'pkCode', it.code));
+    b.onclick = function () { pickItem(it.value); };
+    list.appendChild(b);
+  });
+  list.scrollTop = 0;
+  document.getElementById('pkCount').textContent = hits.length === 0
+    ? '見つかりませんでした。言葉を変えて探してください'
+    : hits.length + '件';
+}
+
+function pickItem(value) {
+  var sel = PICKER_TARGET;
+  closeItemPicker();
+  if (!sel) return;
+  sel.value = value;
+  // プログラムで値を入れても change は起きない。下書きの保存に選んだことを伝える
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+document.getElementById('pkQuery').addEventListener('input', renderItemPicker);
+// 一覧を見始めたら（スクロールしたら）キーボードを閉じる。タップだけでは閉じない
+// （タップの瞬間に閉じると画面がずれ、押したつもりと違う商品が選ばれる）
+document.getElementById('pkList').addEventListener('scroll', function () {
+  if (PICKER_IGNORE_SCROLL) return;   // renderItemPicker が先頭へ戻したときの scroll
+  var q = document.getElementById('pkQuery');
+  if (document.activeElement === q) q.blur();
+});
+// キーボードの「検索」はキーボードを閉じるだけ（絞り込みは打つたびに済んでいる）
+document.getElementById('pkQuery').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') { e.preventDefault(); this.blur(); }
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && !document.getElementById('itemPicker').hidden) closeItemPicker();
+});
 
 // フォームの値を集めるだけ。検証・整形はサーバ（Logic_MobileRun.js）で行う。
 function collectInputForm() {
@@ -1743,7 +2196,9 @@ function toHtmlDate(v) {
   var m = /^\s*(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/.exec(String(v == null ? '' : v));
   return m ? m[1] + '-' + pad2(m[2]) + '-' + pad2(m[3]) : '';
 }
-// シートの表示値（9:00・13:00:00）を <input type=time> 用（09:00）へ。読めなければ空
+// シートの表示値（9:00・13:00:00）を HH:mm（09:00）へ。読めなければ空。
+// 変更モードで setTimeValue に渡す前の整形。normalizeTimeInput は秒つき（13:00:00）を
+// 読めずに空を返すので、秒はここで落とす
 function toHtmlTime(v) {
   var m = /^\s*(\d{1,2}):(\d{2})/.exec(String(v == null ? '' : v));
   return m ? pad2(m[1]) + ':' + m[2] : '';
@@ -1769,6 +2224,8 @@ function ensureSelectOption(sel, value) {
 }
 function setFieldValue(el, value) {
   var v = String(value == null ? '' : value);
+  // 納品時刻は「入力した時刻」として足す（resetTimeFields が片付ける。leaveEditMode の対象外）
+  if (isTimeSelect(el)) { setTimeValue(el, v); return; }
   if (el.tagName === 'SELECT' && v !== '') ensureSelectOption(el, v);
   el.value = v;
 }
@@ -2148,6 +2605,9 @@ function setEditReadOnly(on) {
 function setItemsDisabled(disabled) {
   var els = document.getElementById('inItems').querySelectorAll('.itemCode, .itemQty, .removeItem');
   for (var i = 0; i < els.length; i++) els[i].disabled = disabled;
+  // 無効にした欄の上に検索ボタンが残ると、直せない商品を選び直せてしまう
+  var wraps = document.getElementById('inItems').querySelectorAll('.pickWrap');
+  for (var j = 0; j < wraps.length; j++) syncPickOverlay(wraps[j]);
 }
 
 /**
@@ -2161,6 +2621,7 @@ function enterEditMode(order) {
   state.editItemsEditable = (order.itemsEditable === true);
 
   document.getElementById('saForm').reset();
+  resetTimeFields();
   document.getElementById('saErrors').innerHTML = '';
   document.getElementById('draftBanner').hidden = true;
 
@@ -2240,6 +2701,8 @@ function startChange() {
 
 // フォームの送信先を、新規と変更で振り分ける
 function submitInputForm() {
+  // 納品時刻の手入力を打ちかけのまま進むと、打った時刻が黙って捨てられる。先に確定する
+  if (!commitPendingTimeInputs()) return;
   if (state.editMode) { goConfirmEdit(); } else { goConfirmInput(); }
 }
 
