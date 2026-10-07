@@ -151,12 +151,13 @@
     <button class="btn sub" onclick="goEditSearch()">✎ 受注を変更・キャンセルする</button>
     <button class="btn sub" id="lastBtn" style="display:none" onclick="showLast()">前回の結果を見る</button>
     <!-- 通常は「入力する」で完結するので、主ボタンから外した（2026-09-19 よしさん決定）。
-         入力画面で入れられない受注（13品以上・送料や調整金額を触るもの）を
-         シートへ直接入力したときのために残してある。 -->
+         入力画面で入れられない受注（13品以上など）を
+         シートへ直接入力したときのために残してある。
+         送料・調整金額は 2026-10-07 から入力画面で入れられる。 -->
     <details style="margin-top:16px">
       <summary class="muted">その他</summary>
       <button class="btn sub" onclick="goList('new')">▶ シートに直接入力した新規受注を反映する</button>
-      <!-- 送料・調整金額・13品目以降など、フォームに無い項目をシートで直したときの出口（第2弾 §3-1） -->
+      <!-- 13品目以降など、フォームに無い項目をシートで直したときの出口（第2弾 §3-1） -->
       <button class="btn sub" onclick="goList('edit')">✎ シートで直した変更・キャンセルを反映する</button>
     </details>
   </div>
@@ -267,6 +268,37 @@
 
           <label for="inReceiptNote">但書き</label>
           <input id="inReceiptNote" type="text">
+        </details>
+        <!-- 送料・調整金額（2026-10-07 よしさん決定。新規・変更の両方で直せる）。
+             ふだんは使わないので、任意項目のすぐ下に閉じて置く（よしさん「任意項目の下にツリー表示」）。
+             閉じたままでも今の金額が分かるよう、見出しの横（#feeSummary）に入っている金額だけを出す。
+             金額のエラーが出たら開く（renderInputErrors）。
+             欄は最初は入力不可。原本（変更なら対象の受注）の値を読み込めたら開ける
+             （applyFeeDefaults / enterEditMode）。入力不可の欄は送らない＝シートの値がそのまま残る。
+             読み込む前の空の欄を送ると、原本の基本送料（2,200）を消してしまうため -->
+        <details id="feeDetails">
+          <summary>送料・調整金額（通常は変更不要）<span class="muted" id="feeSummary"></span></summary>
+          <div class="alert warn" id="feeNote" hidden></div>
+          <label for="inBaseShipping">基本送料（税込）</label>
+          <input id="inBaseShipping" type="text" inputmode="numeric" autocomplete="off" disabled>
+
+          <label for="inExtraShipping">追加送料</label>
+          <input id="inExtraShipping" type="text" inputmode="numeric" autocomplete="off" disabled>
+
+          <label for="inCollectShipping">回収送料</label>
+          <input id="inCollectShipping" type="text" inputmode="numeric" autocomplete="off" disabled>
+
+          <!-- 調整金額は値引きのときマイナスを打つ。iPhone のテンキー（inputmode="numeric"）には
+               マイナスが無いので、普通のキーボードのままにする -->
+          <label for="inAdjust8">調整金額(8%)</label>
+          <input id="inAdjust8" type="text" autocomplete="off" placeholder="値引きはマイナス（例：-500）" disabled>
+
+          <label for="inAdjust10">調整金額(10%)</label>
+          <input id="inAdjust10" type="text" autocomplete="off" placeholder="値引きはマイナス（例：-500）" disabled>
+
+          <label for="inAdjustNoTax">調整金額(不課税)</label>
+          <input id="inAdjustNoTax" type="text" autocomplete="off" placeholder="値引きはマイナス（例：-500）" disabled>
+          <div class="muted" style="margin-top:8px">空欄は「なし」になります（0 は入りません）。</div>
         </details>
       </div>
 
@@ -1260,11 +1292,12 @@ function renderDetail(res) {
   var rows = [
     ['ファイル名', d.fileNameCell], ['会社名', d.company], ['担当者', d.person],
     ['配達日', d.deliveryDate], ['納品時間', d.startTime + ' 〜 ' + d.endTime],
-    ['合計食数', d.mealCount], ['合計金額', d.totalAmount ? d.totalAmount + '円' : ''],
+    ['合計食数', d.mealCount], ['合計金額', d.totalAmount ? d.totalAmount + '円' : '']
+  ].concat(feeRows(d.fees)).concat([   // 送料・調整金額（いまのシートの値。2026-10-07）
     ['受注番号', d.orderNo], ['支払方法', d.payment],
     ['注文日', d.orderDate], ['媒体', d.media], ['受渡方法', d.handover], ['配送・集荷担当', d.pickupCarrier],
     ['連絡有無', d.contactNeeded], ['納品時担当者', d.deliveryStaff], ['但書き', d.receiptNote]
-  ];
+  ]);
   document.getElementById('s2detail').innerHTML =
     '<div class="center" style="margin-bottom:12px"><span class="flag ' + flagClass(d.orderType) + '">' +
       esc(d.orderType || '未選択') + '</span></div>' +
@@ -1431,7 +1464,11 @@ function renderResult(r) {
   document.getElementById('rAlerts').innerHTML = alerts.join('');
 
   var nf = r.nextFile || {};
-  document.getElementById('rNext').innerHTML =
+  // 反映が済んだら、シートが計算した請求金額（K28）を出す（送料・調整金額を足し引きした結果）
+  var amountRow = (r.phase === 'done' && r.totalAmount)
+    ? '<div class="row"><span class="k">請求金額</span><span class="v">' + esc(formatYen(r.totalAmount)) + '</span></div>'
+    : '';
+  document.getElementById('rNext').innerHTML = amountRow +
     '<div class="row"><span class="k">次回用ファイル</span><span class="v">' +
     (nf.created ? '作成しました' : esc(nf.reason || '作成していません')) + '</span></div>' +
     (nf.error ? '<div class="muted">' + esc(nf.error) + '</div>' : '');
@@ -1525,6 +1562,113 @@ function applyInputDefaults() {
     var el = document.getElementById(pair[0]);
     if (el && el.value === '' && INPUT_DEFAULTS[pair[1]]) el.value = INPUT_DEFAULTS[pair[1]];
   });
+  applyFeeDefaults();
+}
+
+// ---------------------------------------------------------------
+// 送料・調整金額（2026-10-07 よしさん決定：新規の入力と登録済み受注の変更の両方で直せる）
+// ---------------------------------------------------------------
+// [欄のID, 送るキー, 画面の項目名]。キーは Config_MobileRun.js の MR_FEE_FIELDS と同じ並び
+// （tests/mobileInputGuards.test.js が突き合わせている）。検査はサーバ側（Logic_MobileRun.js と
+// bentou_test2）で行う。ここでは値を集めて見せるだけ。
+var FEE_INPUTS = [
+  ['inBaseShipping', 'baseShipping', '基本送料（税込）'],
+  ['inExtraShipping', 'extraShipping', '追加送料'],
+  ['inCollectShipping', 'collectShipping', '回収送料'],
+  ['inAdjust8', 'adjust8', '調整金額(8%)'],
+  ['inAdjust10', 'adjust10', '調整金額(10%)'],
+  ['inAdjustNoTax', 'adjustNoTax', '調整金額(不課税)']
+];
+var FEE_NOT_LOADED_TEXT = '原本の送料・調整金額を読み込めていないため、ここは入力できません。'
+  + '原本の値（基本送料など）のまま登録されます。直すときはシートで直してください。';
+var FEE_EDIT_UNAVAILABLE_TEXT = 'この受注の送料・調整金額は読み込めなかったため、アプリからは直せません'
+  + '（サーバ側が古い版の可能性があります）。直すときはシートで直してください。';
+
+/** 金額を「2,200円」の形で見せる。空は空、数字として読めない値はそのまま */
+function formatYen(v) {
+  var s = String(v == null ? '' : v).trim();
+  if (s === '') return '';
+  var t = s.replace(/[,\s¥￥円]/g, '');
+  if (!/^-?\d+(\.\d+)?$/.test(t)) return s;
+  var n = Number(t);
+  var parts = String(Math.abs(n)).split('.');
+  return (n < 0 ? '-' : '') + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+    + (parts[1] ? '.' + parts[1] : '') + '円';
+}
+
+/**
+ * 送料・調整金額の折りたたみの見出しに、入っている金額だけを短く出す（例：「：基本送料（税込） 2,200円」）。
+ * ふだんは閉じているので、開かなくても今の値が分かるようにする。全部空なら何も出さない
+ */
+function updateFeeSummary() {
+  var box = document.getElementById('feeSummary');
+  if (!box) return;
+  var parts = [];
+  FEE_INPUTS.forEach(function (f) {
+    var el = document.getElementById(f[0]);
+    var v = el ? String(el.value == null ? '' : el.value).trim() : '';
+    if (v !== '') parts.push(f[2] + ' ' + formatYen(v));
+  });
+  box.textContent = parts.length ? '：' + parts.join('・') : '';
+}
+// 手で打ったときも見出しの要約を合わせる（欄の input は折りたたみ #feeDetails まで伝わる）
+(function () {
+  var d = document.getElementById('feeDetails');
+  if (d && d.addEventListener) d.addEventListener('input', updateFeeSummary);
+})();
+
+/** 金額の欄をまとめて開け閉めする。閉じている欄は collectInputForm が集めない（＝送らない） */
+function setFeeInputsEnabled(enabled, note) {
+  FEE_INPUTS.forEach(function (f) {
+    var el = document.getElementById(f[0]);
+    if (el) el.disabled = !enabled;
+  });
+  var box = document.getElementById('feeNote');
+  box.textContent = note || '';
+  box.hidden = !note;
+}
+
+/**
+ * 新規の入力：原本の送料・調整金額を初期値にする（基本送料 2,200 など）。
+ * 原本の値（mrGetInputChoices の defaults.fees）が届くまで・届かなかったときは、欄を閉じたままにする。
+ * 初期値を入れるのは、欄を初めて開けたときと、まだ何も入力していないとき（まっさらなフォーム）だけ。
+ * 利用者が空にした欄へ、画面を行き来するたびに初期値を入れ直さないため。
+ */
+function applyFeeDefaults() {
+  if (state.editMode) return;   // 変更モードは受注の値を enterEditMode が入れる
+  var fees = INPUT_DEFAULTS.fees;
+  if (!fees || typeof fees !== 'object') {
+    setFeeInputsEnabled(false, FEE_NOT_LOADED_TEXT);
+    updateFeeSummary();
+    return;
+  }
+  var firstOpen = document.getElementById(FEE_INPUTS[0][0]).disabled;
+  setFeeInputsEnabled(true, '');
+  if (!firstOpen && formTouched) { updateFeeSummary(); return; }
+  FEE_INPUTS.forEach(function (f) {
+    var el = document.getElementById(f[0]);
+    var value = fees[f[1]];
+    if (el && el.value === '' && value != null && value !== '') el.value = value;
+  });
+  updateFeeSummary();
+}
+
+/**
+ * 変更モードで金額の欄を開けてよいか。GAS のプロジェクトが2つあり、片方だけ古いことがあるため両方を確かめる。
+ *   - order.feesEditable … このアプリ（bentou_MobileRun）が金額を扱える版の印（mrLoadEditCore_ が付ける）。
+ *     古い版は bentou_test2 の金額をそのまま画面へ渡すが、差分で直した金額を知らせなしに捨てる
+ *   - values.baseShipping … bentou_test2 が受注の金額を返す版か
+ */
+function canEditFees(order) {
+  if (!order || order.feesEditable !== true) return false;
+  var v = order.values || {};
+  return Object.prototype.hasOwnProperty.call(v, 'baseShipping');
+}
+
+/** 確認画面に出す送料・調整金額の行（[項目名, 金額]）。金額を返さない古いサーバのときは出さない */
+function feeRows(fees) {
+  if (!fees) return [];
+  return FEE_INPUTS.map(function (f) { return [f[2], formatYen(fees[f[1]])]; });
 }
 
 function goInput() {
@@ -1561,7 +1705,11 @@ var DRAFT_TEXT_FIELDS = [
   ['inAddress2', 'address2'], ['inMedia', 'media'], ['inPayment', 'payment'],
   ['inHandover', 'handover'], ['inPickupCarrier', 'pickupCarrier'], ['inOrderNo', 'orderNo'],
   ['inContactNote', 'contactNote'], ['inContactNeeded', 'contactNeeded'],
-  ['inDeliveryStaff', 'deliveryStaff'], ['inReceiptNote', 'receiptNote']
+  ['inDeliveryStaff', 'deliveryStaff'], ['inReceiptNote', 'receiptNote'],
+  // 送料・調整金額（FEE_INPUTS と同じ組）。変更モードで受注の値を流し込むのにも使う
+  ['inBaseShipping', 'baseShipping'], ['inExtraShipping', 'extraShipping'],
+  ['inCollectShipping', 'collectShipping'], ['inAdjust8', 'adjust8'],
+  ['inAdjust10', 'adjust10'], ['inAdjustNoTax', 'adjustNoTax']
 ];
 
 function saveDraftNow() {
@@ -1595,6 +1743,13 @@ function restoreDraft() {
     // 差し替わるとき buildChoiceField が値を引き継ぐ。
     el.value = f[pair[1]];
   });
+  // 金額は空欄も「空にした」として戻す（下書きに金額のキーがあるのは、欄を開けていたときだけ）。
+  // 戻さないと、空にした基本送料に原本の 2,200 が残ったままになる
+  FEE_INPUTS.forEach(function (fi) {
+    var el = document.getElementById(fi[0]);
+    if (el && Object.prototype.hasOwnProperty.call(f, fi[1])) el.value = f[fi[1]] == null ? '' : f[fi[1]];
+  });
+  updateFeeSummary();
   var items = (f.items || []).filter(function (it) { return it && (it.code || it.quantity); });
   if (items.length > 0) {
     document.getElementById('inItems').innerHTML = '';
@@ -1671,6 +1826,7 @@ function clearInputForm() {
   document.getElementById('draftBanner').hidden = true;
   formTouched = false;
   applyInputDefaults();
+  updateFeeSummary();
 }
 
 /**
@@ -1977,7 +2133,7 @@ function collectInputForm() {
     var qtyEl = rows[i].querySelector('.itemQty');
     items.push({ code: codeEl.value, quantity: Number(qtyEl.value) });
   }
-  return {
+  var form = {
     shopName: document.getElementById('inShopName').value,
     deliveryDate: document.getElementById('inDeliveryDate').value,
     startTime: document.getElementById('inStartTime').value,
@@ -1999,11 +2155,22 @@ function collectInputForm() {
     orderNo: document.getElementById('inOrderNo').value,
     items: items
   };
+  // 送料・調整金額は、欄を開けているとき（原本・受注の値を読み込めたとき）だけ送る。
+  // 送らなければサーバは原本・受注の値をそのまま残す（閉じた空の欄を送ると基本送料などを消す）
+  FEE_INPUTS.forEach(function (f) {
+    var el = document.getElementById(f[0]);
+    if (el && !el.disabled) form[f[1]] = el.value;
+  });
+  return form;
 }
 
 function renderInputErrors(errors) {
   var box = document.getElementById('saErrors');
   box.innerHTML = '';
+  // 送料・調整金額はふだん閉じているので、金額のエラーのときは開いて直す欄を見せる
+  if ((errors || []).some(function (msg) { return /送料|調整金額/.test(String(msg)); })) {
+    document.getElementById('feeDetails').open = true;
+  }
   (errors || []).forEach(function (msg) {
     var div = document.createElement('div');
     div.className = 'alert err';
@@ -2114,6 +2281,13 @@ function renderInputConfirm(res) {
   addRow('連絡有無', f.contactNeeded);
   addRow('納品時担当者', f.deliveryStaff);
   addRow('但書き', f.receiptNote);
+  // 送料・調整金額。シートへ書いたあとにサーバが読み返した値（res.fees）を出す
+  // （欄を閉じていて送らなかった金額も、原本の値として見える）。古いサーバで返ってこないときだけ入力した値
+  var fees = res.fees || {};
+  FEE_INPUTS.forEach(function (fi) {
+    var v = Object.prototype.hasOwnProperty.call(fees, fi[1]) ? fees[fi[1]] : f[fi[1]];
+    addRow(fi[2], formatYen(v));
+  });
   addRow('合計食数', computed.mealCount);
   addRow('合計金額', computed.totalAmount ? computed.totalAmount + '円' : '');
   addRow('カレンダータイトル', computed.eventTitle);
@@ -2655,6 +2829,11 @@ function enterEditMode(order) {
     setFieldValue(el, value);
   });
   setEditReadOnly(true);
+  // 送料・調整金額は、アプリとサーバの両方が金額を扱える版のときだけ欄を開ける（canEditFees）。
+  // 古い版のときは閉じたまま送らない（空の欄を「空へ変更」として送らない・直した金額を黙って捨てさせない）。
+  // 控え（editBaseline）を取る前に開けること。閉じたまま取ると、触っていない金額を見分けられない
+  var feesOpen = canEditFees(order);
+  setFeeInputsEnabled(feesOpen, feesOpen ? '' : FEE_EDIT_UNAVAILABLE_TEXT);
 
   var wrap = document.getElementById('inItems');
   wrap.innerHTML = '';
@@ -2682,7 +2861,7 @@ function enterEditMode(order) {
 
   var banner = document.getElementById('editBanner');
   banner.textContent = '登録済みの受注を直しています（受注番号 ' + (v.orderNo || '不明')
-    + '）。灰色の欄は変更できません。送料・調整金額などフォームに無い項目はシートの値のまま残ります。';
+    + '）。灰色の欄は変更できません。フォームに無い項目はシートの値のまま残ります。';
   banner.hidden = false;
   var btn = document.getElementById('saSubmitBtn');
   btn.disabled = false;
@@ -2690,6 +2869,7 @@ function enterEditMode(order) {
 
   // 触っていない欄を見分けるための控え。表示用に変換した値（日付の表記など）を
   // そのまま送ると、変えていないのに変更点になりうるため、触っていない欄は元の値を送る。
+  updateFeeSummary();
   state.editBaseline = collectInputForm();
 }
 
