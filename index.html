@@ -2656,10 +2656,16 @@ function renderOrderSearch(res, byName) {
   SEARCH_SHOWN = 0;
   var msg = document.getElementById('seMsg');
   msg.innerHTML = '';
+  // メールから自動で入った受注（くるめし 等）はアプリで直せないので一覧から外してある（2026-10-15）
+  var hidden = (!byName && res.hiddenAutoCount > 0) ? res.hiddenAutoCount : 0;
   if (orders.length === 0) {
+    // 自動受注だけが当たったときに「見つかりませんでした…ファイル名で探す」と出すと、外した件数の案内と食い違い、
+    // 名前で探しても（手動の受注フォルダしか見ないので）見つからない行き止まりへ誘ってしまう
     msg.appendChild(mkAlert('warn', byName
       ? 'その名前のファイルは見つかりませんでした。'
-      : '今日以降の受注が見つかりませんでした。言葉を変えるか、「ファイル名で探す」を試してください。'));
+      : (hidden > 0
+        ? 'アプリで直せる受注は見つかりませんでした。'
+        : '今日以降の受注が見つかりませんでした。言葉を変えるか、「ファイル名で探す」を試してください。')));
   } else {
     msg.appendChild(mkAlert('info', byName
       ? 'ファイル名で ' + orders.length + ' 件見つかりました。直す受注を選んでください。'
@@ -2667,6 +2673,13 @@ function renderOrderSearch(res, byName) {
   }
   if (res.truncated) {
     msg.appendChild(mkAlert('warn', '件数が多いため一部だけ表示しています。検索する言葉で絞り込んでください。'));
+  }
+  // 「無い」と誤解されないよう、外した件数を知らせる。媒体名は並べない（MR_CONST.AUTO_ORDER_MEDIA を
+  // 増やしたときに文面が追いつかなくなるため）。手入力でも媒体に くるめし 等と入れた受注は外れるので、逃げ道も書く
+  if (hidden > 0) {
+    msg.appendChild(mkAlert('info', 'メールから自動で取り込まれた受注（くるめし など） ' + hidden
+      + ' 件は、アプリでは変更・キャンセルできないため表示していません。PCで直してください'
+      + '（手入力した受注は「ファイル名で探す」で探せます）。'));
   }
 
   document.getElementById('seList').innerHTML = '';
