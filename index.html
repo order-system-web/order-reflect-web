@@ -69,6 +69,30 @@
   .diffRow .after { font-weight:700; color:var(--orange); }
   .itemRow .removeItem { flex:0 0 auto; width:44px; padding:10px 0; border:1px solid var(--line);
     border-radius:8px; background:#fff; color:var(--red); font-size:16px; font-weight:700; }
+  /* オリジナル商品（一覧に無い商品）の行（2026-10-20）。名前・金額・税率・種別を .origFields にまとめ、
+     個数と×はその下へ折り返す（幅 375px でも横にはみ出さない）。
+     品の切れ目が分かるよう、薄い枠と背景で1品ずつ囲む */
+  .originalRow { flex-wrap:wrap; padding:8px; border:1px solid var(--line); border-radius:10px; background:#f8f9fa; }
+  .origFields { display:flex; flex-wrap:wrap; align-items:center; gap:6px; flex:1 1 100%; }
+  .origName { flex:1 1 100%; }
+  /* 金額・税率・種別は、input・select の既定の width:100% をやめて並べる。
+     幅 375px では金額で1行、その下に税率・種別。幅が広ければ（下の @media）金額も同じ行に並ぶ。
+     税率・種別は flex-basis 0 で残りの幅を分ける（選んだ文字の長さで行が折り返して、見出しと欄が離れないように） */
+  .origFields .origPrice { flex:1 1 100%; width:auto; min-width:0; }
+  .origFields .origTax { flex:1 1 0; width:auto; min-width:0; order:3; }
+  .origFields .origKind { flex:1 1 0; width:auto; min-width:0; order:5; }
+  /* 税率・種別の見出し。行の作り（欄の数と順）を変えないよう .origFields の ::before・::after で出し、
+     order でそれぞれの選択欄の前に置く（読み上げ用の aria-label はそのまま） */
+  .origFields::before, .origFields::after { flex:0 0 auto; font-size:12px; font-weight:600; color:var(--gray); }
+  .origFields::before { content:'税率'; order:2; }
+  .origFields::after { content:'種別'; order:4; margin-left:4px; }
+  /* 幅 600px 以上なら、金額・税率・種別を1行に並べる（金額に2、税率・種別に1ずつの割合で幅を分ける）。
+     それより狭いと税率・種別の欄が「ドリンク」も出せないほど細くなる */
+  @media (min-width: 600px) {
+    .origFields .origPrice { flex:2 1 0; }
+  }
+  /* .btn は display:block なので、hidden 属性（変更モードで古い版のとき）だけでは隠れない */
+  #addOriginalBtn[hidden] { display:none; }
   /* 商品の欄の上に重ねる透明なボタン。押すと検索つきの選択画面を開く（2026-09-29）。
      select 自体は残す（下書き・変更モード・送信前の必須チェックがそのまま select の値で動く） */
   .pickWrap { position:relative; flex:1 1 auto; min-width:0; }
@@ -308,6 +332,7 @@
         <div class="alert warn" id="editItemsNote" hidden></div>
         <div id="inItems"></div>
         <button type="button" class="btn sub" id="addItemBtn" onclick="addItemRow()">＋ 商品を追加</button>
+        <button type="button" class="btn sub" id="addOriginalBtn" onclick="addOriginalRow(null)">＋ オリジナル商品を追加</button>
       </div>
 
       <button type="submit" class="btn" id="saSubmitBtn">確認へ</button>
@@ -395,6 +420,8 @@ var state = { mode: 'new', files: [], token: null, detail: null,
               editOrder: null,       // mrLoadEdit の戻り値（開いたときの値）
               editBaseline: null,    // 値を流し込んだ直後のフォームの内容（触った欄を見分けるため）
               editItemsEditable: true,
+              // アプリのサーバと受注処理の両方がオリジナル商品を扱える版か（mrLoadEdit の originalsEditable）
+              editOriginalsEditable: true,
               pendingEdit: null,     // 書き換えたまま未反映の受注（mrGetPendingEdit の戻り値）
               noRevertSsId: '' };    // 一覧表へ反映済みで「元に戻す」を出してはいけない受注
 var MODE_LABEL = { new: 'シートに直接入力した新規受注を反映', edit: 'シートで直した変更・キャンセルを反映' };
@@ -402,6 +429,15 @@ var MODE_LABEL = { new: 'シートに直接入力した新規受注を反映', e
 // MR_CONST.MAX_ITEMS（Config_MobileRun.js）と同じ値にすること。
 // index.html はテストできないため、ここに定数を複製している。
 var MAX_ITEMS = 12;
+
+// オリジナル商品（一覧に無い商品）の上限と選択肢。MR_ORIGINAL（Config_MobileRun.js）と同じ値にすること
+// （MAX_ITEMS と同じく tests/mobileInputGuards.test.js が突き合わせる）。検査はサーバ側で行う。
+// 新しい行の既定は先頭の値（8%・商品。MR_ORIGINAL.DEFAULT_TAX_RATE・DEFAULT_KIND と同じ）
+var ORIGINAL_NAME_MAX = 40;
+var ORIGINAL_PRICE_LIMIT = 1000000;
+var ORIGINAL_TAX_RATES = [8, 10];
+var ORIGINAL_KINDS = ['商品', 'ドリンク', '備品'];
+var ORIGINAL_OLD_SERVER_MESSAGE = 'オリジナル商品は、受注処理が新しい版になるまで使えません。管理者へご連絡ください';
 
 var SCREEN_IDS = ['s0','s1','s2','s3','s4','sa','se','sv'];
 
@@ -1305,12 +1341,15 @@ function renderDetail(res) {
       return '<div class="row"><span class="k">' + esc(r[0]) + '</span><span class="v">' + esc(r[1]) + '</span></div>';
     }).join('');
 
+  // 単価が空（一覧の金額が空の商品）と、小計が空（K は TEXT(…,"#,##0;;") なので 0 は空になる）は 0円と出す
   document.getElementById('s2items').innerHTML =
     '<div class="k" style="margin-bottom:8px">商品明細</div>' +
     (d.items && d.items.length
       ? d.items.map(function (it) {
+          var price = String(it.unitPrice == null ? '' : it.unitPrice).trim() || '0';
+          var amount = String(it.amount == null ? '' : it.amount).trim() || '0';
           return '<div class="row"><span class="k">' + esc(it.name) + '</span><span class="v">' +
-                 esc(it.unitPrice) + '円 × ' + esc(it.qty) + '食 ＝ ' + esc(it.amount) + '円</span></div>';
+                 esc(price) + '円 × ' + esc(it.qty) + '食 ＝ ' + esc(amount) + '円</span></div>';
         }).join('')
       : '<div class="muted">商品がありません</div>') +
     '<div class="muted" style="margin-top:12px">' +
@@ -1750,10 +1789,15 @@ function restoreDraft() {
     if (el && Object.prototype.hasOwnProperty.call(f, fi[1])) el.value = f[fi[1]] == null ? '' : f[fi[1]];
   });
   updateFeeSummary();
-  var items = (f.items || []).filter(function (it) { return it && (it.code || it.quantity); });
+  // オリジナル商品は、個数がまだ空でも名前か金額があれば戻す（打ちかけの行を消さない）
+  var items = (f.items || []).filter(function (it) {
+    return it && (it.code || it.quantity
+      || (it.original && (String(it.original.name || '').trim() !== '' || it.original.price !== '')));
+  });
   if (items.length > 0) {
     document.getElementById('inItems').innerHTML = '';
     items.forEach(function (it) {
+      if (it.original) { addOriginalRow(it); return; }
       addItemRow();
       var rows = document.getElementById('inItems').querySelectorAll('.itemRow');
       var row = rows[rows.length - 1];
@@ -1967,10 +2011,126 @@ function addItemRow() {
   updateAddItemBtn();
 }
 
+/**
+ * オリジナル商品（一覧に無い商品）の行を足す（2026-10-20）。名前・1食の金額（税込）・税率・種別を打つ。
+ * item があればその値を入れる（下書き・変更モードで読み込んだ品）。略語は受注処理が付けるので
+ * data-orig-code に持つだけ（新しい品は ''）。検査はサーバ側で行う。
+ * 行は通常の商品と合わせて MAX_ITEMS まで。作った行を返す（作れなければ null）
+ */
+function addOriginalRow(item) {
+  var wrap = document.getElementById('inItems');
+  if (wrap.querySelectorAll('.itemRow').length >= MAX_ITEMS) return null;
+  var original = (item && item.original) || null;
+
+  var row = document.createElement('div');
+  row.className = 'itemRow originalRow';
+  row.setAttribute('data-orig-code', (item && item.code) || '');
+
+  var fields = document.createElement('div');
+  fields.className = 'origFields';
+
+  var nameEl = document.createElement('input');
+  nameEl.type = 'text';
+  nameEl.className = 'origName';
+  nameEl.maxLength = ORIGINAL_NAME_MAX;
+  nameEl.required = true;
+  nameEl.placeholder = '商品名（オリジナル）';
+  nameEl.setAttribute('aria-label', '商品名（オリジナル）');
+
+  // 金額は必須にしない（PC で入れた行は金額が空のことがある。触っていない行を送信で止めない）
+  var priceEl = document.createElement('input');
+  priceEl.type = 'number';
+  priceEl.className = 'origPrice';
+  priceEl.inputMode = 'numeric';
+  priceEl.min = '0';
+  priceEl.step = '1';
+  priceEl.placeholder = '1食の金額（税込）';
+  priceEl.setAttribute('aria-label', '1食の金額（税込）');
+
+  var taxEl = document.createElement('select');
+  taxEl.className = 'origTax';
+  taxEl.setAttribute('aria-label', '税率');
+  // 税率が空の品（PC で入れた行など）は「選んでください」を先頭に出して空のまま見せる。
+  // 8% を入れると、触っていない行が「変えた」とみなされる
+  var rateBlank = !!original && String(original.taxRate == null ? '' : original.taxRate) === '';
+  if (rateBlank) {
+    var blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = '選んでください';
+    taxEl.appendChild(blank);
+  }
+  ORIGINAL_TAX_RATES.forEach(function (rate) {
+    var opt = document.createElement('option');
+    opt.value = String(rate);
+    opt.textContent = rate + '%';
+    taxEl.appendChild(opt);
+  });
+
+  var kindEl = document.createElement('select');
+  kindEl.className = 'origKind';
+  kindEl.setAttribute('aria-label', '種別');
+  ORIGINAL_KINDS.forEach(function (kind) {
+    var opt = document.createElement('option');
+    opt.value = kind;
+    opt.textContent = kind;
+    kindEl.appendChild(opt);
+  });
+
+  var qtyEl = document.createElement('input');
+  qtyEl.type = 'number';
+  qtyEl.className = 'itemQty';
+  qtyEl.inputMode = 'numeric';
+  qtyEl.min = '1';
+  qtyEl.step = '1';
+  qtyEl.required = true;
+  qtyEl.placeholder = '個数';
+  qtyEl.setAttribute('aria-label', '個数');
+
+  var delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'removeItem';
+  delBtn.textContent = '×';
+  delBtn.setAttribute('aria-label', '商品を削除');
+  delBtn.onclick = function () {
+    wrap.removeChild(row);
+    updateAddItemBtn();
+    scheduleDraftSave();   // 行の削除は input イベントが出ないので明示的に保存を予約する
+  };
+
+  fields.appendChild(nameEl);
+  fields.appendChild(priceEl);
+  fields.appendChild(taxEl);
+  fields.appendChild(kindEl);
+  row.appendChild(fields);
+  row.appendChild(qtyEl);
+  row.appendChild(delBtn);
+  wrap.appendChild(row);
+
+  // 選択肢を足してから値を入れる（先に入れると select が値を受け付けない）
+  if (original) {
+    // 改行とタブを半角空白にし、前後の空白を除く（mrNormalizeOriginal_ と同じ）。1行の欄は改行を落とすため、
+    // そのまま入れると触っていない行の名前が変わる。全角空白などは変えない
+    nameEl.value = String(original.name == null ? '' : original.name).replace(/[\r\n\t]/g, ' ').trim();
+    priceEl.value = original.price == null ? '' : String(original.price);
+    taxEl.value = rateBlank ? '' : String(original.taxRate);
+    if (original.kind) kindEl.value = original.kind;
+  } else {
+    taxEl.value = String(ORIGINAL_TAX_RATES[0]);
+    kindEl.value = ORIGINAL_KINDS[0];
+  }
+  qtyEl.value = item && item.quantity ? item.quantity : '';
+  updateAddItemBtn();
+  return row;
+}
+
 function updateAddItemBtn() {
   var count = document.getElementById('inItems').querySelectorAll('.itemRow').length;
-  document.getElementById('addItemBtn').disabled =
-    (count >= MAX_ITEMS) || (state.editMode && !state.editItemsEditable);
+  var disabled = (count >= MAX_ITEMS) || (state.editMode && !state.editItemsEditable);
+  document.getElementById('addItemBtn').disabled = disabled;
+  var originalBtn = document.getElementById('addOriginalBtn');
+  originalBtn.disabled = disabled;
+  // 変更モードで、アプリのサーバか受注処理が古い版（オリジナル商品を扱えない）なら出さない
+  originalBtn.hidden = state.editMode && !state.editOriginalsEditable;
 }
 
 // ---------------------------------------------------------------
@@ -2129,8 +2289,24 @@ function collectInputForm() {
   var items = [];
   var rows = document.getElementById('inItems').querySelectorAll('.itemRow');
   for (var i = 0; i < rows.length; i++) {
-    var codeEl = rows[i].querySelector('.itemCode');
     var qtyEl = rows[i].querySelector('.itemQty');
+    if (rows[i].classList.contains('originalRow')) {
+      // 金額・税率の欄が空なら ''（0 にすると、触っていない行が「変えた」とみなされる）
+      var price = rows[i].querySelector('.origPrice').value;
+      var taxRate = rows[i].querySelector('.origTax').value;
+      items.push({
+        code: rows[i].getAttribute('data-orig-code') || '',
+        quantity: Number(qtyEl.value),
+        original: {
+          name: rows[i].querySelector('.origName').value,
+          price: price === '' ? '' : Number(price),
+          taxRate: taxRate === '' ? '' : Number(taxRate),
+          kind: rows[i].querySelector('.origKind').value
+        }
+      });
+      continue;
+    }
+    var codeEl = rows[i].querySelector('.itemCode');
     items.push({ code: codeEl.value, quantity: Number(qtyEl.value) });
   }
   var form = {
@@ -2182,6 +2358,18 @@ function renderInputErrors(errors) {
   if (box.scrollIntoView) { box.scrollIntoView(); } else { window.scrollTo(0, 0); }
 }
 
+/**
+ * 新規の入力が確認へ進めなかったときに出す文言。オリジナル商品を送ったのに「商品略語が空」で断られたら、
+ * アプリのサーバか受注処理（bentou_test2）が、オリジナル商品を知らない古い版。
+ * どちらが断っても同じ文言にする（古い版の「2品目の商品略語が空です」では、何を直せばよいか分からない）
+ */
+function explainInputErrors(form, errors) {
+  var list = errors || [];
+  var hasOriginal = ((form && form.items) || []).some(function (it) { return it && it.original; });
+  var oldServer = list.some(function (msg) { return String(msg).indexOf('商品略語が空') !== -1; });
+  return (hasOriginal && oldServer) ? [ORIGINAL_OLD_SERVER_MESSAGE] : list;
+}
+
 function goConfirmInput() {
   var btn = document.getElementById('saSubmitBtn');
   if (btn.disabled) return;  // 連打による二重送信（＝孤児ファイル）を防ぐ
@@ -2197,7 +2385,7 @@ function goConfirmInput() {
   google.script.run
     .withSuccessHandler(function (res) {
       restore();
-      if (!res.ok) { renderInputErrors(res.errors); return; }
+      if (!res.ok) { renderInputErrors(explainInputErrors(form, res.errors)); return; }
       state.token = res.token;
       state.inputMode = true;
       state.inputForm = form;
@@ -2206,7 +2394,7 @@ function goConfirmInput() {
     })
     .withFailureHandler(function (e) {
       restore();
-      renderInputErrors([e.message]);
+      renderInputErrors(explainInputErrors(form, [e.message]));
     })
     .mrPrepareInput(authArg(), form);
 }
@@ -2318,27 +2506,37 @@ function renderInputConfirm(res) {
   itemsTitle.textContent = '商品明細';
   itemsBox.appendChild(itemsTitle);
 
-  // サーバは金額の内訳を返さないため、入力した略語×個数をそのまま並べる
+  function addItemLine(k, v) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    var kEl = document.createElement('span');
+    kEl.className = 'k';
+    kEl.textContent = k;
+    var vEl = document.createElement('span');
+    vEl.className = 'v';
+    vEl.textContent = v;
+    row.appendChild(kEl);
+    row.appendChild(vEl);
+    itemsBox.appendChild(row);
+  }
+  // サーバが受注ファイルから読み返した商品行（res.lines）があれば、商品名と金額で出す（renderDetail と同じ形）。
+  // 単価は3桁ごとに「,」、小計はシートの表示のまま。返さない古いサーバのときは、入力した略語×個数を並べる。
+  // 単価が空（一覧の金額が空の商品）と、小計が空（K は TEXT(…,"#,##0;;") なので 0 は空になる）は 0円と出す
+  var lines = (res.lines && res.lines.length) ? res.lines : null;
   var items = (state.inputForm && state.inputForm.items) || [];
-  if (items.length === 0) {
+  if (lines) {
+    lines.forEach(function (line) {
+      var amount = String(line.amount == null ? '' : line.amount).trim();
+      addItemLine((line.name || line.code) + (line.original ? '（オリジナル）' : ''),
+        (formatYen(line.unitPrice) || '0円') + ' × ' + line.quantity + '食 ＝ ' + (amount || '0') + '円');
+    });
+  } else if (items.length === 0) {
     var none = document.createElement('div');
     none.className = 'muted';
     none.textContent = '商品がありません';
     itemsBox.appendChild(none);
   } else {
-    items.forEach(function (it) {
-      var row = document.createElement('div');
-      row.className = 'row';
-      var kEl = document.createElement('span');
-      kEl.className = 'k';
-      kEl.textContent = it.code;
-      var vEl = document.createElement('span');
-      vEl.className = 'v';
-      vEl.textContent = it.quantity + ' 食';
-      row.appendChild(kEl);
-      row.appendChild(vEl);
-      itemsBox.appendChild(row);
-    });
+    items.forEach(function (it) { addItemLine(it.code, it.quantity + ' 食'); });
   }
   var note = document.createElement('div');
   note.className = 'muted';
@@ -2809,7 +3007,8 @@ function setEditReadOnly(on) {
 }
 
 function setItemsDisabled(disabled) {
-  var els = document.getElementById('inItems').querySelectorAll('.itemCode, .itemQty, .removeItem');
+  var els = document.getElementById('inItems')
+    .querySelectorAll('.itemCode, .itemQty, .removeItem, .origName, .origPrice, .origTax, .origKind');
   for (var i = 0; i < els.length; i++) els[i].disabled = disabled;
   // 無効にした欄の上に検索ボタンが残ると、直せない商品を選び直せてしまう
   var wraps = document.getElementById('inItems').querySelectorAll('.pickWrap');
@@ -2824,7 +3023,13 @@ function enterEditMode(order) {
   if (!state.editMode && draftTimer) saveDraftNow();
   state.editMode = true;
   state.inputMode = false;
-  state.editItemsEditable = (order.itemsEditable === true);
+  // オリジナル商品を直させるのは、アプリのサーバと受注処理の両方が扱える版のとき（印は mrLoadEditCore_ が付ける）。
+  // そのときは商品を直せるかも新しい規則（originalItemsEditable）で決める。古い版のときは今と同じ（itemsEditable）。
+  // 控え（editBaseline）を取る前に決めること（控えの商品の形が変わる）
+  state.editOriginalsEditable = (order.originalsEditable === true);
+  state.editItemsEditable = state.editOriginalsEditable
+    ? order.originalItemsEditable === true
+    : order.itemsEditable === true;
 
   document.getElementById('saForm').reset();
   resetTimeFields();
@@ -2851,6 +3056,12 @@ function enterEditMode(order) {
   var wrap = document.getElementById('inItems');
   wrap.innerHTML = '';
   (order.items || []).forEach(function (it) {
+    // 古い版のときは、オリジナル商品も今と同じく略語の行で出す（名前・金額は直せない）
+    if (state.editOriginalsEditable && it.original) {
+      var orow = addOriginalRow(it);
+      if (orow) orow.setAttribute('data-filled', '1');
+      return;
+    }
     addItemRow();   // 13品目以降は行を作れない（そのときは itemsEditable が false で、商品は送らない）
     var rows = wrap.querySelectorAll('.itemRow');
     var row = rows[rows.length - 1];
@@ -2892,6 +3103,7 @@ function leaveEditMode() {
   state.editMode = false;
   state.editBaseline = null;
   state.editItemsEditable = true;
+  state.editOriginalsEditable = true;
   setEditReadOnly(false);
   var extras = document.getElementById('saForm').querySelectorAll('option[data-edit-extra]');
   for (var i = 0; i < extras.length; i++) extras[i].parentNode.removeChild(extras[i]);
@@ -2957,7 +3169,9 @@ function goConfirmEdit() {
     kind: 'change',
     original: state.editOrder,
     edited: buildEditedForm(),
-    itemsEditable: state.editItemsEditable
+    itemsEditable: state.editItemsEditable,
+    // オリジナル商品を扱っている画面か。true のときだけ、アプリのサーバが受注処理へ合図（originalsAware）を送る
+    originalsAware: state.editOriginalsEditable
   };
   google.script.run
     .withSuccessHandler(function (res) {
